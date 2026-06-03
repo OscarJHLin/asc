@@ -6,83 +6,73 @@
 
 import os
 import subprocess
-import json
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Generator, Any
+from typing import Dict, Optional, Generator, Any
 from ..core.config import Config
+from ..core.logging import get_logger
+
+logger = get_logger('engine')
 
 
 class InferenceEngine:
     """
     推理引擎类
     
-    管理模型加载和推理任务执行
+    管理模型加载和推理任务执行，通过 llama.cpp 命令行接口调用
     """
     
     def __init__(self, config: Config = None):
-        """
-        初始化推理引擎
-        
-        Args:
-            config: 配置对象
-        """
         self.config = config or Config()
         self.backend = self.config.get('inference', 'backend', 'llama.cpp')
         
-        # 查找 llama.cpp 可执行文件
-        self.llama_cli = self._find_llama_cli()
-        self.llama_server = self._find_llama_server()
+        # 查找可执行文件
+        self.llama_cli = self._find_executable('llama-cli')
+        self.llama_server = self._find_executable('llama-server')
         
         self.current_model: Optional[str] = None
         self.model_info: Optional[Dict] = None
-        
         self._server_process: Optional[subprocess.Popen] = None
+        
+        if self.llama_cli:
+            logger.info(f"找到推理引擎: {self.llama_cli}")
+        else:
+            logger.warning("未找到 llama-cli，推理功能不可用")
     
-    def _find_llama_cli(self) -> Optional[str]:
-        """查找 llama-cli 可执行文件"""
-        script_dir = Path(__file__).parent.parent.parent.resolve()
+    def _find_executable(self, name: str) -> Optional[str]:
+        """
+        查找可执行文件
+        
+        搜索顺序：
+        1. 项目内的 llama.cpp 目录
+        2. 环境变量 PATH
+        3. 常见安装路径
+        """
+        project_root = Path(__file__).parent.parent.parent.resolve()
+        
         # 项目内路径
         candidates = [
-            script_dir / "llama.cpp" / "build" / "bin" / "Release" / "llama-cli.exe",
-            script_dir / "llama.cpp" / "build" / "bin" / "llama-cli",
-            script_dir / "llama.cpp" / "build-linux" / "bin" / "llama-cli",
+            project_root / "llama.cpp" / "build" / "bin" / "Release" / f"{name}.exe",
+            project_root / "llama.cpp" / "build" / "bin" / name,
+            project_root / "llama.cpp" / "build-linux" / "bin" / name,
         ]
         
-        # 父目录路径（开发环境）
-        parent_dir = script_dir.parent
-        candidates.extend([
-            parent_dir / "exo" / "llama.cpp" / "build" / "bin" / "Release" / "llama-cli.exe",
-            parent_dir / "exo" / "llama.cpp" / "build" / "bin" / "llama-cli",
-            parent_dir / "exo" / "llama.cpp" / "build-linux" / "bin" / "llama-cli",
-        ])
+        # 用户自定义路径（通过环境变量）
+        custom_path = os.getenv('ASC_LLAMA_PATH')
+        if custom_path:
+            candidates.insert(0, Path(custom_path) / f"{name}.exe")
+            candidates.insert(1, Path(custom_path) / name)
         
         for path in candidates:
             if path.exists():
                 return str(path.resolve())
-        return None
-    
-    def _find_llama_server(self) -> Optional[str]:
-        """查找 llama-server 可执行文件"""
-        script_dir = Path(__file__).parent.parent.parent.resolve()
-        # 项目内路径
-        candidates = [
-            script_dir / "llama.cpp" / "build" / "bin" / "Release" / "llama-server.exe",
-            script_dir / "llama.cpp" / "build" / "bin" / "llama-server",
-            script_dir / "llama.cpp" / "build-linux" / "bin" / "llama-server",
-        ]
         
-        # 父目录路径（开发环境）
-        parent_dir = script_dir.parent
-        candidates.extend([
-            parent_dir / "exo" / "llama.cpp" / "build" / "bin" / "Release" / "llama-server.exe",
-            parent_dir / "exo" / "llama.cpp" / "build" / "bin" / "llama-server",
-            parent_dir / "exo" / "llama.cpp" / "build-linux" / "bin" / "llama-server",
-        ])
+        # 检查系统 PATH
+        import shutil
+        found = shutil.which(name)
+        if found:
+            return found
         
-        for path in candidates:
-            if path.exists():
-                return str(path.resolve())
         return None
     
     def load_model(self, model_path: str) -> bool:
@@ -96,57 +86,33 @@ class InferenceEngine:
             是否加载成功
         """
         if not os.path.exists(model_path):
-            print(f"[Engine] 模型文件不存在: {model_path}")
+            logger.error(f"模型文件不存在: {model_path}")
             return False
         
-        self.current_model = model_path
-        
-        # 获取模型信息
+        self.current_model = os.path.abspath(model_path)
         self.model_info = self._get_model_info(model_path)
         
-        print(f"[Engine] 模型已加载: {Path(model_path).name}")
-        if self.model_info:
-            print(f"[Engine] 模型信息: {self.model_info}")
-        
+        logger.info(f"模型已加载: {Path(model_path).name}")
         return True
     
     def _get_model_info(self, model_path: str) -> Optional[Dict]:
-        """获取模型信息"""
+        """获取模型基本信息"""
         try:
-            # 使用 llama-gguf 工具获取信息
-            script_dir = Path(__file__).parent.parent.parent.resolve()
-            gguf_tool = script_dir / "llama.cpp" / "build" / "bin" / "Release" / "llama-gguf.exe"
-            
-            if not gguf_tool.exists():
-                return None
-            
-            result = subprocess.run(
-                [str(gguf_tool), "dump", model_path],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
-            
-            if result.returncode == 0:
-                # 解析输出
-                info = {}
-                for line in result.stdout.split('\n'):
-                    if ':' in line:
-                        key, value = line.split(':', 1)
-                        info[key.strip()] = value.strip()
-                return info
-            
+            file_size = os.path.getsize(model_path)
+            return {
+                'path': model_path,
+                'size_mb': file_size // (1024 * 1024),
+                'format': 'GGUF',
+            }
         except Exception as e:
-            print(f"[Engine] 获取模型信息失败: {e}")
-        
-        return None
+            logger.warning(f"获取模型信息失败: {e}")
+            return None
     
     def infer(self, 
               prompt: str,
               max_tokens: int = None,
               temperature: float = None,
-              top_p: float = None,
-              stream: bool = False) -> Dict[str, Any]:
+              top_p: float = None) -> Dict[str, Any]:
         """
         执行推理
         
@@ -155,16 +121,15 @@ class InferenceEngine:
             max_tokens: 最大生成token数
             temperature: 温度参数
             top_p: top-p采样参数
-            stream: 是否流式输出
             
         Returns:
             推理结果字典
         """
         if not self.current_model:
-            return {'error': '未加载模型'}
+            return {'success': False, 'error': '未加载模型'}
         
         if not self.llama_cli:
-            return {'error': '未找到 llama-cli'}
+            return {'success': False, 'error': '未找到 llama-cli，请编译 llama.cpp 或设置 ASC_LLAMA_PATH'}
         
         # 使用默认配置
         max_tokens = max_tokens or self.config.get('inference', 'max_tokens', 128)
@@ -200,51 +165,85 @@ class InferenceEngine:
             if result.returncode == 0:
                 output = result.stdout.strip()
                 
-                # 估算token数
-                tokens_generated = len(output.split())
+                # 过滤 llama-cli 的 banner 输出
+                # banner 以 "> prompt" 开头标记实际推理结果
+                lines = output.split('\n')
+                filtered_lines = []
+                in_response = False
+                for line in lines:
+                    if line.startswith('> ') and not in_response:
+                        in_response = True
+                        continue  # 跳过 "> prompt" 行
+                    if in_response:
+                        filtered_lines.append(line)
+                
+                if filtered_lines:
+                    output = '\n'.join(filtered_lines).strip()
+                
+                # 从输出中解析性能数据
+                tokens_per_sec = 0.0
+                tokens_generated = 0
+                prompt_tps = 0.0
+                
+                for line in result.stderr.split('\n') if result.stderr else []:
+                    if 'prompt eval' in line.lower() and 't/s' in line:
+                        try:
+                            prompt_tps = float(line.split('=')[-1].strip().split()[0])
+                        except (ValueError, IndexError):
+                            pass
+                    elif 'eval time' in line.lower() and 't/s' in line:
+                        try:
+                            tokens_per_sec = float(line.split('=')[-1].strip().split()[0])
+                            tokens_generated = int(line.split('/')[0].split()[-1])
+                        except (ValueError, IndexError):
+                            pass
+                
+                if tokens_generated == 0:
+                    tokens_generated = len(output.split())
+                    tokens_per_sec = tokens_generated / elapsed if elapsed > 0 else 0
                 
                 return {
                     'success': True,
                     'output': output,
                     'tokens_generated': tokens_generated,
                     'elapsed_time': elapsed,
-                    'tokens_per_sec': tokens_generated / elapsed if elapsed > 0 else 0,
+                    'tokens_per_sec': tokens_per_sec,
+                    'prompt_tps': prompt_tps,
                 }
             else:
+                error_msg = result.stderr.strip() if result.stderr else 'Unknown error'
                 return {
                     'success': False,
-                    'error': result.stderr,
+                    'error': error_msg,
                     'elapsed_time': elapsed,
                 }
         
         except subprocess.TimeoutExpired:
-            return {'error': '推理超时'}
+            return {'success': False, 'error': '推理超时（300秒）'}
+        except FileNotFoundError:
+            return {'success': False, 'error': f'无法执行: {self.llama_cli}'}
         except Exception as e:
-            return {'error': str(e)}
+            return {'success': False, 'error': str(e)}
     
     def infer_stream(self, prompt: str, **kwargs) -> Generator[str, None, None]:
         """
-        流式推理
+        流式推理（简化实现）
         
         Args:
             prompt: 提示词
-            **kwargs: 其他参数
             
         Yields:
             生成的文本片段
         """
-        # 流式输出需要启动 llama-server
-        # 这里简化处理，直接返回完整结果
         result = self.infer(prompt, **kwargs)
-        
         if result.get('success'):
             yield result['output']
         else:
             yield f"Error: {result.get('error', 'Unknown error')}"
     
-    def start_server(self, port: int = 8080) -> bool:
+    def start_server(self, port: int = None) -> bool:
         """
-        启动推理服务器
+        启动推理服务器（llama-server）
         
         Args:
             port: 服务器端口
@@ -253,16 +252,18 @@ class InferenceEngine:
             是否启动成功
         """
         if not self.current_model:
-            print("[Engine] 请先加载模型")
+            logger.error("请先加载模型")
             return False
         
         if not self.llama_server:
-            print("[Engine] 未找到 llama-server")
+            logger.error("未找到 llama-server")
             return False
         
         if self._server_process:
-            print("[Engine] 服务器已在运行")
+            logger.info("服务器已在运行")
             return True
+        
+        port = port or self.config.get('inference', 'server_port', 8081)
         
         cmd = [
             self.llama_server,
@@ -277,19 +278,17 @@ class InferenceEngine:
                 stderr=subprocess.PIPE,
                 text=True
             )
-            
-            # 等待服务器启动
             time.sleep(2)
             
             if self._server_process.poll() is None:
-                print(f"[Engine] 推理服务器已启动 (端口: {port})")
+                logger.info(f"推理服务器已启动 (端口: {port})")
                 return True
             else:
-                print("[Engine] 服务器启动失败")
+                logger.error("服务器启动失败")
                 return False
         
         except Exception as e:
-            print(f"[Engine] 启动服务器失败: {e}")
+            logger.error(f"启动服务器失败: {e}")
             return False
     
     def stop_server(self) -> None:
@@ -298,15 +297,10 @@ class InferenceEngine:
             self._server_process.terminate()
             self._server_process.wait(timeout=5)
             self._server_process = None
-            print("[Engine] 推理服务器已停止")
+            logger.info("推理服务器已停止")
     
     def get_status(self) -> Dict[str, Any]:
-        """
-        获取引擎状态
-        
-        Returns:
-            状态信息字典
-        """
+        """获取引擎状态"""
         return {
             'backend': self.backend,
             'model_loaded': self.current_model is not None,
@@ -318,5 +312,4 @@ class InferenceEngine:
         }
     
     def __del__(self):
-        """析构时停止服务器"""
         self.stop_server()

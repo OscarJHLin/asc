@@ -12,13 +12,11 @@ from typing import Optional
 
 class LoggerManager:
     """
-    日志管理器
-    
-    统一管理项目日志配置
+    日志管理器（单例模式）
     """
     
     _instance = None
-    _loggers = {}
+    _initialized = False
     
     def __new__(cls):
         if cls._instance is None:
@@ -26,6 +24,10 @@ class LoggerManager:
         return cls._instance
     
     def __init__(self):
+        if self._initialized:
+            return
+        self._initialized = True
+        self._loggers = {}
         self.log_dir = Path('./logs')
         self.log_dir.mkdir(exist_ok=True)
         self.default_level = logging.INFO
@@ -51,58 +53,34 @@ class LoggerManager:
         logger = logging.getLogger(name)
         logger.setLevel(level or self.default_level)
         
-        # 避免重复添加处理器
         if not logger.handlers:
-            # 控制台处理器
             console_handler = logging.StreamHandler(sys.stdout)
             console_handler.setFormatter(self.formatter)
             logger.addHandler(console_handler)
             
-            # 文件处理器
-            file_handler = logging.FileHandler(
-                self.log_dir / f'{name}.log',
-                encoding='utf-8'
-            )
-            file_handler.setFormatter(self.formatter)
-            logger.addHandler(file_handler)
+            try:
+                file_handler = logging.FileHandler(
+                    self.log_dir / f'{name}.log',
+                    encoding='utf-8'
+                )
+                file_handler.setFormatter(self.formatter)
+                logger.addHandler(file_handler)
+            except Exception:
+                pass  # 日志目录不可用时仅使用控制台
         
         self._loggers[name] = logger
         return logger
     
     def set_level(self, level: int) -> None:
-        """
-        设置全局日志级别
-        
-        Args:
-            level: 日志级别
-        """
+        """设置全局日志级别"""
         self.default_level = level
         for logger in self._loggers.values():
             logger.setLevel(level)
-    
-    def set_log_dir(self, log_dir: str) -> None:
-        """
-        设置日志目录
-        
-        Args:
-            log_dir: 日志目录路径
-        """
-        self.log_dir = Path(log_dir)
-        self.log_dir.mkdir(exist_ok=True)
 
 
-# 全局日志管理器实例
 logger_manager = LoggerManager()
 
 
 def get_logger(name: str) -> logging.Logger:
-    """
-    获取日志记录器的便捷函数
-    
-    Args:
-        name: 日志器名称
-        
-    Returns:
-        日志记录器
-    """
+    """获取日志记录器的便捷函数"""
     return logger_manager.get_logger(name)

@@ -5,10 +5,10 @@
 """
 
 import json
+import uuid
 import time
 from enum import Enum
-from typing import Dict, Any, Optional
-from dataclasses import dataclass, asdict
+from typing import Dict, Any, Tuple
 
 
 class MessageType(Enum):
@@ -32,20 +32,12 @@ class TaskType(Enum):
     HEALTH_CHECK = "health_check"
 
 
-@dataclass
 class Message:
     """
     消息基类
     
     所有节点间通信消息的基类
     """
-    msg_type: str
-    sender_id: str
-    sender_ip: str
-    sender_port: int
-    timestamp: float
-    payload: Dict[str, Any]
-    msg_id: str
     
     def __init__(self,
                  msg_type: str,
@@ -60,12 +52,7 @@ class Message:
         self.sender_port = sender_port
         self.timestamp = time.time()
         self.payload = payload or {}
-        self.msg_id = msg_id or self._generate_msg_id()
-    
-    def _generate_msg_id(self) -> str:
-        """生成消息ID"""
-        import uuid
-        return str(uuid.uuid4())[:12]
+        self.msg_id = msg_id or str(uuid.uuid4())[:12]
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
@@ -100,19 +87,15 @@ class Message:
     @classmethod
     def from_json(cls, json_str: str) -> 'Message':
         """从JSON字符串创建消息"""
-        data = json.loads(json_str)
-        return cls.from_dict(data)
+        return cls.from_dict(json.loads(json_str))
 
 
-@dataclass
 class TaskMessage(Message):
     """
     任务消息
     
     用于任务分配和结果返回
     """
-    task_id: str = None
-    task_type: str = None
     
     def __init__(self,
                  msg_type: str,
@@ -129,7 +112,7 @@ class TaskMessage(Message):
             payload=payload,
             **kwargs
         )
-        self.task_id = task_id or self._generate_msg_id()
+        self.task_id = task_id or str(uuid.uuid4())[:12]
         self.task_type = task_type or TaskType.INFERENCE.value
     
     def to_dict(self) -> Dict[str, Any]:
@@ -150,45 +133,35 @@ class ProtocolValidator:
     REQUIRED_FIELDS = ['msg_type', 'sender_id', 'sender_ip', 'timestamp']
     
     @classmethod
-    def validate(cls, data: Dict[str, Any]) -> tuple[bool, str]:
+    def validate(cls, data: Dict[str, Any]) -> Tuple[bool, str]:
         """
         验证消息
         
-        Args:
-            data: 消息字典
-            
         Returns:
             (是否有效, 错误信息)
         """
-        # 检查必需字段
         for field in cls.REQUIRED_FIELDS:
             if field not in data:
                 return False, f"Missing required field: {field}"
         
-        # 验证消息类型
         msg_type = data.get('msg_type')
         if msg_type not in [t.value for t in MessageType]:
             return False, f"Unknown message type: {msg_type}"
         
-        # 验证时间戳
         timestamp = data.get('timestamp')
         if not isinstance(timestamp, (int, float)):
             return False, "Invalid timestamp"
         
-        # 检查消息是否过期（超过5分钟）
         if time.time() - timestamp > 300:
             return False, "Message expired"
         
         return True, ""
     
     @classmethod
-    def validate_task(cls, data: Dict[str, Any]) -> tuple[bool, str]:
+    def validate_task(cls, data: Dict[str, Any]) -> Tuple[bool, str]:
         """
         验证任务消息
         
-        Args:
-            data: 任务消息字典
-            
         Returns:
             (是否有效, 错误信息)
         """
@@ -196,7 +169,6 @@ class ProtocolValidator:
         if not valid:
             return valid, error
         
-        # 检查任务特有字段
         if 'task_id' not in data:
             return False, "Missing task_id"
         
