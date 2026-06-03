@@ -1,7 +1,7 @@
 """
-ExoLlama 主入口
+ASC (All System Cluster) - 分布式AI推理框架
 
-支持直接运行: python -m exollama
+主入口模块
 """
 
 from src.cli.main import main

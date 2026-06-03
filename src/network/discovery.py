@@ -21,8 +21,8 @@ class NodeDiscovery:
     通过UDP广播和HTTP健康检查发现内网节点
     """
     
-    DISCOVERY_MAGIC = "EXOLLAMA_DISCOVER"
-    RESPONSE_MAGIC = "EXOLLAMA_RESPONSE"
+    DISCOVERY_MAGIC = "ASC_DISCOVER"
+    RESPONSE_MAGIC = "ASC_RESPONSE"
     
     def __init__(self, config: Config = None, 
                  on_node_found: Callable[[Node], None] = None):

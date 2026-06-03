@@ -180,6 +180,7 @@ class InferenceEngine:
             '--temp', str(temperature),
             '--top-p', str(top_p),
             '--no-display-prompt',
+            '--single-turn',
         ]
         
         start_time = time.time()
@@ -189,6 +190,8 @@ class InferenceEngine:
                 cmd,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 timeout=300
             )
             

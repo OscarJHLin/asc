@@ -2,7 +2,7 @@
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
 
-   Copyright 2024 Oscar Lin
+   Copyright 2024-2025 Oscar Lin
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -18,19 +18,45 @@
 
 ---
 
-第三方组件声明：
+THIRD-PARTY COMPONENTS NOTICE:
+
+This project includes or depends on the following third-party components:
 
 1. llama.cpp
-   - 版权: Georgi Gerganov
-   - 许可证: MIT License
-   - 用途: 底层推理引擎
-   - 仓库: https://github.com/ggerganov/llama.cpp
+   - Copyright: Georgi Gerganov and contributors
+   - License: MIT License
+   - Usage: Underlying inference engine (external dependency)
+   - Repository: https://github.com/ggerganov/llama.cpp
+   - Note: This project does not include llama.cpp source code.
+     Users must obtain and compile llama.cpp separately.
 
-2. exo (参考项目)
-   - 版权: exo-explore
-   - 许可证: MIT License
-   - 用途: 分布式推理思路参考
-   - 仓库: https://github.com/exo-explore/exo
+2. exo (Reference Project)
+   - Copyright: exo-explore and contributors
+   - License: MIT License
+   - Usage: Conceptual reference for distributed inference architecture
+   - Repository: https://github.com/exo-explore/exo
+   - Note: This project is independently developed and does not share
+     code with exo. Only general distributed system concepts were referenced.
 
-本项目为独立开发，与上述项目无直接关联。代码实现均为原创，
-仅参考了分布式系统的通用设计思路。
+INDEPENDENT DEVELOPMENT STATEMENT:
+
+ASC (All System Cluster) is an independently developed project created by Oscar Lin.
+All source code in this repository is original work, except where
+explicitly noted. The project implements distributed AI inference
+using llama.cpp as an external backend engine through its public API.
+
+This project is not affiliated with, endorsed by, or derived from
+the exo project or llama.cpp project, except as noted above.
+
+---
+
+Patent Notice:
+
+This project is licensed under the Apache License 2.0, which includes
+an express grant of patent rights from contributors to users. For the
+full patent grant, see Section 3 of the Apache License 2.0 at:
+https://www.apache.org/licenses/LICENSE-2.0
+
+No patents are known to be applicable to this project by the author.
+Users are responsible for ensuring their use complies with applicable
+patent laws in their jurisdiction.

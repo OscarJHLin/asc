@@ -8,6 +8,7 @@ import socket
 import time
 import platform
 import psutil
+import subprocess
 from enum import Enum
 from typing import Dict, Any, Optional
 from dataclasses import dataclass, field
@@ -31,7 +32,7 @@ class NodeResources:
     memory_used: int = 0   # MB
     memory_percent: float = 0.0
     gpu_count: int = 0
-    gpu_memory: Dict[str, int] = field(default_factory=dict)
+    gpu_info: list = field(default_factory=list)
     disk_free: int = 0     # MB
     
     def to_dict(self) -> Dict[str, Any]:
@@ -42,7 +43,7 @@ class NodeResources:
             'memory_used': self.memory_used,
             'memory_percent': self.memory_percent,
             'gpu_count': self.gpu_count,
-            'gpu_memory': self.gpu_memory,
+            'gpu_info': self.gpu_info,
             'disk_free': self.disk_free,
         }
 
@@ -115,30 +116,79 @@ class Node:
         disk = psutil.disk_usage('/')
         self.resources.disk_free = disk.free // (1024 * 1024)
         
-        # 检测GPU
+        # 检测GPU - 使用轻量级方法
         self._detect_gpu()
     
     def _detect_gpu(self) -> None:
-        """检测GPU信息"""
+        """检测GPU信息 - 不依赖torch"""
+        system = self.platform
+        
+        if system == 'Windows':
+            self._detect_windows_gpu()
+        elif system == 'Linux':
+            self._detect_linux_gpu()
+        elif system == 'Darwin':
+            self._detect_macos_gpu()
+    
+    def _detect_windows_gpu(self) -> None:
+        """检测Windows GPU"""
         try:
-            import torch
-            if torch.cuda.is_available():
-                self.resources.gpu_count = torch.cuda.device_count()
-                for i in range(self.resources.gpu_count):
-                    props = torch.cuda.get_device_properties(i)
-                    self.resources.gpu_memory[f'gpu_{i}'] = props.total_memory // (1024 * 1024)
-                self.capabilities.append('cuda')
-        except ImportError:
+            result = subprocess.run(
+                ['wmic', 'path', 'win32_VideoController', 'get', 'name,AdapterRAM'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                lines = result.stdout.strip().split('\n')[1:]  # 跳过标题
+                for line in lines:
+                    if line.strip():
+                        self.resources.gpu_count += 1
+                        self.resources.gpu_info.append({'name': line.strip()})
+                if self.resources.gpu_count > 0:
+                    self.capabilities.append('cuda')
+        except Exception:
+            pass
+    
+    def _detect_linux_gpu(self) -> None:
+        """检测Linux GPU"""
+        try:
+            result = subprocess.run(
+                ['nvidia-smi', '--query-gpu=name,memory.total', '--format=csv,noheader'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                lines = result.stdout.strip().split('\n')
+                for line in lines:
+                    if line.strip():
+                        self.resources.gpu_count += 1
+                        self.resources.gpu_info.append({'name': line.strip()})
+                if self.resources.gpu_count > 0:
+                    self.capabilities.append('cuda')
+        except Exception:
             pass
         
-        # 检测 Metal (macOS)
-        if self.platform == 'Darwin':
-            try:
-                import torch
-                if torch.backends.mps.is_available():
+        # 检测ROCm
+        try:
+            result = subprocess.run(
+                ['rocm-smi', '--showproductname'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                self.capabilities.append('rocm')
+        except Exception:
+            pass
+    
+    def _detect_macos_gpu(self) -> None:
+        """检测macOS GPU (Metal)"""
+        try:
+            result = subprocess.run(
+                ['system_profiler', 'SPDisplaysDataType'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                if 'Metal' in result.stdout:
                     self.capabilities.append('metal')
-            except:
-                pass
+        except Exception:
+            pass
     
     def update_status(self, status: NodeStatus) -> None:
         """

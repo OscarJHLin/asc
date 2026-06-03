@@ -60,7 +60,7 @@ class WebUIServer:
             template_folder=str(template_dir),
             static_folder=str(static_dir)
         )
-        self.app.config['SECRET_KEY'] = 'exollama-secret-key'
+        self.app.config['SECRET_KEY'] = 'asc-secret-key'
         
         self.socketio = SocketIO(self.app, cors_allowed_origins="*")
         

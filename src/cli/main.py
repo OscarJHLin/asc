@@ -21,9 +21,9 @@ from src.inference.engine import InferenceEngine
 from src.ui.server import WebUIServer
 
 
-class ExoLlamaCLI:
+class ASCCLI:
     """
-    命令行接口类
+    ASC 命令行接口类
     
     提供一键启动、节点管理、推理任务等功能
     """
@@ -38,28 +38,33 @@ class ExoLlamaCLI:
     def run(self):
         """运行 CLI"""
         parser = argparse.ArgumentParser(
-            description='ExoLlama - 分布式AI推理框架',
+            description='ASC (All System Cluster) - 分布式AI推理框架',
             formatter_class=argparse.RawDescriptionHelpFormatter,
             epilog="""
 示例:
   %(prog)s                          # 启动节点并自动发现
-  %(prog)s --mode master            # 启动主节点
-  %(prog)s --mode worker --master-ip 192.168.1.100  # 启动工作节点
+  %(prog)s start --mode master      # 启动主节点
+  %(prog)s start --mode worker --master-ip 192.168.1.100  # 启动工作节点
   %(prog)s infer --model model.gguf --prompt "Hello"  # 运行推理
   %(prog)s status                   # 查看节点状态
+  %(prog)s discover                 # 发现网络节点
             """
         )
         
-        parser.add_argument('--mode', choices=['auto', 'master', 'worker'], 
-                           default='auto', help='节点模式')
-        parser.add_argument('--master-ip', help='主节点IP (worker模式)')
-        parser.add_argument('--port', type=int, help='节点端口')
-        parser.add_argument('--rpc-port', type=int, help='RPC端口')
-        parser.add_argument('--config', help='配置文件路径')
-        parser.add_argument('--no-ui', action='store_true', help='禁用Web UI')
-        parser.add_argument('--no-discover', action='store_true', help='禁用自动发现')
+        parser.add_argument('--version', action='version', version='ASC 1.0.0')
         
         subparsers = parser.add_subparsers(dest='command', help='可用命令')
+        
+        # start 命令
+        start_parser = subparsers.add_parser('start', help='启动节点')
+        start_parser.add_argument('--mode', choices=['auto', 'master', 'worker'], 
+                               default='auto', help='节点模式')
+        start_parser.add_argument('--master-ip', help='主节点IP (worker模式)')
+        start_parser.add_argument('--port', type=int, help='节点端口')
+        start_parser.add_argument('--rpc-port', type=int, help='RPC端口')
+        start_parser.add_argument('--config', help='配置文件路径')
+        start_parser.add_argument('--no-ui', action='store_true', help='禁用Web UI')
+        start_parser.add_argument('--no-discover', action='store_true', help='禁用自动发现')
         
         # infer 命令
         infer_parser = subparsers.add_parser('infer', help='运行推理')
@@ -82,32 +87,35 @@ class ExoLlamaCLI:
             self.config = Config(args.config)
         
         # 应用命令行参数
-        if args.port:
+        if hasattr(args, 'port') and args.port:
             self.config.set('node', 'port', args.port)
-        if args.rpc_port:
+        if hasattr(args, 'rpc_port') and args.rpc_port:
             self.config.set('node', 'rpc_port', args.rpc_port)
         
         # 执行命令
-        if args.command == 'infer':
+        if args.command == 'start' or args.command is None:
+            self._cmd_start(args)
+        elif args.command == 'infer':
             self._cmd_infer(args)
         elif args.command == 'status':
             self._cmd_status()
         elif args.command == 'discover':
             self._cmd_discover()
         else:
-            self._cmd_start(args)
+            parser.print_help()
     
     def _cmd_start(self, args):
         """启动节点"""
         print("=" * 60)
-        print("ExoLlama - 分布式AI推理框架")
+        print("ASC (All System Cluster) - 分布式AI推理框架")
         print("=" * 60)
         
         # 启动集群管理
         self.cluster.start()
         
         # 启动节点发现
-        if not args.no_discover:
+        no_discover = getattr(args, 'no_discover', False)
+        if not no_discover:
             self.discovery = NodeDiscovery(
                 self.config,
                 on_node_found=self._on_node_found
@@ -115,14 +123,17 @@ class ExoLlamaCLI:
             self.discovery.start()
         
         # 启动 Web UI
-        if not args.no_ui:
+        no_ui = getattr(args, 'no_ui', False)
+        if not no_ui:
             self.ui = WebUIServer(self.cluster, self.config)
             self.ui.start()
         
         # 根据模式处理
-        if args.mode == 'worker' and args.master_ip:
-            print(f"[CLI] 工作节点模式，连接主节点: {args.master_ip}")
-            # 这里应该实现连接主节点的逻辑
+        mode = getattr(args, 'mode', 'auto')
+        master_ip = getattr(args, 'master_ip', None)
+        
+        if mode == 'worker' and master_ip:
+            print(f"[CLI] 工作节点模式，连接主节点: {master_ip}")
         else:
             print(f"[CLI] 节点已启动")
             print(f"[CLI] 节点信息: {self.cluster.local_node}")
@@ -140,7 +151,7 @@ class ExoLlamaCLI:
     def _cmd_infer(self, args):
         """运行推理"""
         print("=" * 60)
-        print("ExoLlama - 推理任务")
+        print("ASC - 推理任务")
         print("=" * 60)
         
         # 加载模型
@@ -160,7 +171,16 @@ class ExoLlamaCLI:
         
         if result.get('success'):
             print(f"\n[CLI] 推理结果:")
-            print(result['output'])
+            # 处理 Windows 终端编码问题
+            output = result['output']
+            try:
+                print(output)
+            except UnicodeEncodeError:
+                # 过滤掉无法编码的字符
+                import sys
+                encoding = sys.stdout.encoding or 'utf-8'
+                safe_output = output.encode(encoding, errors='replace').decode(encoding)
+                print(safe_output)
             print(f"\n[CLI] 统计:")
             print(f"  生成token数: {result.get('tokens_generated', 0)}")
             print(f"  耗时: {result.get('elapsed_time', 0):.2f}s")
@@ -171,7 +191,7 @@ class ExoLlamaCLI:
     def _cmd_status(self):
         """查看状态"""
         print("=" * 60)
-        print("ExoLlama - 节点状态")
+        print("ASC - 节点状态")
         print("=" * 60)
         
         info = self.cluster.get_cluster_info()
@@ -194,7 +214,7 @@ class ExoLlamaCLI:
     def _cmd_discover(self):
         """发现节点"""
         print("=" * 60)
-        print("ExoLlama - 节点发现")
+        print("ASC - 节点发现")
         print("=" * 60)
         
         discovery = NodeDiscovery(self.config)
@@ -221,7 +241,7 @@ class ExoLlamaCLI:
 
 def main():
     """主入口"""
-    cli = ExoLlamaCLI()
+    cli = ASCCLI()
     cli.run()
 
 

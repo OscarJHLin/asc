@@ -84,12 +84,12 @@ class Config:
     def _apply_env_overrides(self) -> None:
         """应用环境变量覆盖"""
         env_mappings = {
-            'EXOLLAMA_NODE_PORT': ('node', 'port'),
-            'EXOLLAMA_NODE_NAME': ('node', 'name'),
-            'EXOLLAMA_RPC_PORT': ('node', 'rpc_port'),
-            'EXOLLAMA_DISCOVERY_PORT': ('network', 'discovery_port'),
-            'EXOLLAMA_UI_PORT': ('ui', 'port'),
-            'EXOLLAMA_MODELS_PATH': ('paths', 'models'),
+            'ASC_NODE_PORT': ('node', 'port'),
+            'ASC_NODE_NAME': ('node', 'name'),
+            'ASC_RPC_PORT': ('node', 'rpc_port'),
+            'ASC_DISCOVERY_PORT': ('network', 'discovery_port'),
+            'ASC_UI_PORT': ('ui', 'port'),
+            'ASC_MODELS_PATH': ('paths', 'models'),
         }
         
         for env_var, (section, key) in env_mappings.items():
