@@ -33,6 +33,14 @@ ENV/
 *.swo
 *~
 
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
 # Logs
 logs/
 *.log
@@ -40,6 +48,15 @@ logs/
 # Models (user should provide their own)
 models/*.gguf
 models/*.bin
+*.gguf
+*.safetensors
+*.bin
+*.pth
+*.pt
+*.ckpt
+*.joblib
+*.pickle
+*.pkl
 
 # OS
 .DS_Store
@@ -49,3 +66,9 @@ Thumbs.db
 temp/
 tmp/
 *.tmp
+
+# Config
+config.json
+
+# Node
+node_modules/
