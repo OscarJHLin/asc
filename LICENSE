@@ -1,0 +1,36 @@
+                                 Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+
+   Copyright 2024 Oscar Lin
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+
+---
+
+第三方组件声明：
+
+1. llama.cpp
+   - 版权: Georgi Gerganov
+   - 许可证: MIT License
+   - 用途: 底层推理引擎
+   - 仓库: https://github.com/ggerganov/llama.cpp
+
+2. exo (参考项目)
+   - 版权: exo-explore
+   - 许可证: MIT License
+   - 用途: 分布式推理思路参考
+   - 仓库: https://github.com/exo-explore/exo
+
+本项目为独立开发，与上述项目无直接关联。代码实现均为原创，
+仅参考了分布式系统的通用设计思路。
