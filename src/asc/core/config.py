@@ -18,7 +18,6 @@ import os
 from pathlib import Path
 from typing import Any
 
-
 # 默认配置
 _DEFAULTS: dict[str, dict[str, Any]] = {
     "node": {

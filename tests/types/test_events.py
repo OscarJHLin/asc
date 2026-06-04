@@ -1,8 +1,7 @@
 """测试事件类型定义和 IndexedEvent。"""
 
-from asc.types.common import EventId, InstanceId, NodeId, SessionId, generate_event_id
+from asc.types.common import InstanceId, NodeId
 from asc.types.events import (
-    Event,
     IndexedEvent,
     InstanceCreated,
     InstanceDeleted,
@@ -69,7 +68,7 @@ class TestEventImmutability:
         e = NodeJoined(node_id=NodeId("n1"), ip="10.0.0.1", port=52415)
         try:
             e.ip = "10.0.0.2"  # type: ignore[misc]
-            assert False, "Should be immutable"
+            raise AssertionError("Should be immutable")
         except (AttributeError, TypeError):
             pass
 
@@ -82,7 +81,7 @@ class TestEventImmutability:
         )
         try:
             e.model_id = "other"  # type: ignore[misc]
-            assert False, "Should be immutable"
+            raise AssertionError("Should be immutable")
         except (AttributeError, TypeError):
             pass
 
@@ -115,7 +114,7 @@ class TestIndexedEvent:
         ie = IndexedEvent(event=e, index=1)
         try:
             ie.index = 2  # type: ignore[misc]
-            assert False, "Should be immutable"
+            raise AssertionError("Should be immutable")
         except (AttributeError, TypeError):
             pass
 

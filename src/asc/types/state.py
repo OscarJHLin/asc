@@ -28,11 +28,10 @@ from asc.types.events import (
     TaskCompleted,
     TaskCreated,
     TaskFailed,
-    event_type,
 )
 
-
 # --- 值对象 ---
+
 
 @dataclass(frozen=True)
 class NodeInfo:
@@ -77,6 +76,7 @@ class TaskInfo:
 
 # --- 集群状态 ---
 
+
 @dataclass(frozen=True)
 class ClusterState:
     """集群全局不可变状态。
@@ -96,6 +96,7 @@ def empty_state() -> ClusterState:
 
 
 # --- 事件应用 ---
+
 
 def apply(state: ClusterState, indexed_event: IndexedEvent) -> ClusterState:
     """将事件应用到状态，返回新状态。
@@ -118,12 +119,16 @@ def apply(state: ClusterState, indexed_event: IndexedEvent) -> ClusterState:
 
 # --- 事件处理器 ---
 
+
 def _apply_node_joined(state: ClusterState, event: NodeJoined) -> ClusterState:
-    new_nodes = {**state.nodes, event.node_id: NodeInfo(
-        node_id=event.node_id,
-        ip=event.ip,
-        port=event.port,
-    )}
+    new_nodes = {
+        **state.nodes,
+        event.node_id: NodeInfo(
+            node_id=event.node_id,
+            ip=event.ip,
+            port=event.port,
+        ),
+    }
     return replace(state, nodes=new_nodes)
 
 
@@ -133,12 +138,15 @@ def _apply_node_left(state: ClusterState, event: NodeLeft) -> ClusterState:
 
 
 def _apply_instance_created(state: ClusterState, event: InstanceCreated) -> ClusterState:
-    new_instances = {**state.instances, event.instance_id: InstanceInfo(
-        instance_id=event.instance_id,
-        model_id=event.model_id,
-        node_ids=list(event.node_ids),
-        sharding=event.sharding,
-    )}
+    new_instances = {
+        **state.instances,
+        event.instance_id: InstanceInfo(
+            instance_id=event.instance_id,
+            model_id=event.model_id,
+            node_ids=list(event.node_ids),
+            sharding=event.sharding,
+        ),
+    }
     return replace(state, instances=new_instances)
 
 

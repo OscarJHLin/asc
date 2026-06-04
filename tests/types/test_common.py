@@ -109,7 +109,7 @@ class TestSessionId:
         sid = SessionId(master_node_id=NodeId("m"), election_clock=1)
         try:
             sid.election_clock = 2  # type: ignore[misc]
-            assert False, "Should be immutable"
+            raise AssertionError("Should be immutable")
         except (AttributeError, TypeError):
             pass
 

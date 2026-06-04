@@ -20,10 +20,6 @@ from asc.types.events import (
     TaskFailed,
 )
 from asc.types.state import (
-    ClusterState,
-    InstanceInfo,
-    NodeInfo,
-    TaskInfo,
     TaskStatus,
     apply,
     empty_state,
@@ -57,7 +53,7 @@ class TestStateImmutability:
         s = empty_state()
         try:
             s.event_index = 99  # type: ignore[misc]
-            assert False, "Should be immutable"
+            raise AssertionError("Should be immutable")
         except (AttributeError, TypeError):
             pass
 
@@ -96,15 +92,35 @@ class TestApplyNodeJoined:
 
     def test_multiple_nodes(self):
         s = empty_state()
-        s = apply(s, IndexedEvent(event=NodeJoined(node_id=NodeId("n1"), ip="10.0.0.1", port=52415), index=1))
-        s = apply(s, IndexedEvent(event=NodeJoined(node_id=NodeId("n2"), ip="10.0.0.2", port=52415), index=2))
+        s = apply(
+            s,
+            IndexedEvent(
+                event=NodeJoined(node_id=NodeId("n1"), ip="10.0.0.1", port=52415), index=1
+            ),
+        )
+        s = apply(
+            s,
+            IndexedEvent(
+                event=NodeJoined(node_id=NodeId("n2"), ip="10.0.0.2", port=52415), index=2
+            ),
+        )
         assert len(s.nodes) == 2
 
     def test_duplicate_node_joined_updates_info(self):
         """同一节点重复加入应更新信息而非报错。"""
         s = empty_state()
-        s = apply(s, IndexedEvent(event=NodeJoined(node_id=NodeId("n1"), ip="10.0.0.1", port=52415), index=1))
-        s = apply(s, IndexedEvent(event=NodeJoined(node_id=NodeId("n1"), ip="10.0.0.99", port=52416), index=2))
+        s = apply(
+            s,
+            IndexedEvent(
+                event=NodeJoined(node_id=NodeId("n1"), ip="10.0.0.1", port=52415), index=1
+            ),
+        )
+        s = apply(
+            s,
+            IndexedEvent(
+                event=NodeJoined(node_id=NodeId("n1"), ip="10.0.0.99", port=52416), index=2
+            ),
+        )
         assert len(s.nodes) == 1
         assert s.nodes[NodeId("n1")].ip == "10.0.0.99"
         assert s.nodes[NodeId("n1")].port == 52416
@@ -115,7 +131,12 @@ class TestApplyNodeLeft:
 
     def test_removes_node(self):
         s = empty_state()
-        s = apply(s, IndexedEvent(event=NodeJoined(node_id=NodeId("n1"), ip="10.0.0.1", port=52415), index=1))
+        s = apply(
+            s,
+            IndexedEvent(
+                event=NodeJoined(node_id=NodeId("n1"), ip="10.0.0.1", port=52415), index=1
+            ),
+        )
         s = apply(s, IndexedEvent(event=NodeLeft(node_id=NodeId("n1")), index=2))
         assert NodeId("n1") not in s.nodes
 
@@ -160,9 +181,18 @@ class TestApplyInstanceDeleted:
 
     def test_deletes_instance(self):
         s = empty_state()
-        s = apply(s, IndexedEvent(event=InstanceCreated(
-            instance_id=InstanceId("i1"), model_id="m", node_ids=[NodeId("n1")], sharding="tensor"
-        ), index=1))
+        s = apply(
+            s,
+            IndexedEvent(
+                event=InstanceCreated(
+                    instance_id=InstanceId("i1"),
+                    model_id="m",
+                    node_ids=[NodeId("n1")],
+                    sharding="tensor",
+                ),
+                index=1,
+            ),
+        )
         s = apply(s, IndexedEvent(event=InstanceDeleted(instance_id=InstanceId("i1")), index=2))
         assert InstanceId("i1") not in s.instances
 
@@ -177,12 +207,27 @@ class TestApplyTaskEvents:
 
     def test_task_created(self):
         s = empty_state()
-        s = apply(s, IndexedEvent(event=InstanceCreated(
-            instance_id=InstanceId("i1"), model_id="m", node_ids=[NodeId("n1")], sharding="tensor"
-        ), index=1))
-        s = apply(s, IndexedEvent(event=TaskCreated(
-            task_id=TaskId("t1"), instance_id=InstanceId("i1"), prompt="hello"
-        ), index=2))
+        s = apply(
+            s,
+            IndexedEvent(
+                event=InstanceCreated(
+                    instance_id=InstanceId("i1"),
+                    model_id="m",
+                    node_ids=[NodeId("n1")],
+                    sharding="tensor",
+                ),
+                index=1,
+            ),
+        )
+        s = apply(
+            s,
+            IndexedEvent(
+                event=TaskCreated(
+                    task_id=TaskId("t1"), instance_id=InstanceId("i1"), prompt="hello"
+                ),
+                index=2,
+            ),
+        )
         assert TaskId("t1") in s.tasks
         task = s.tasks[TaskId("t1")]
         assert task.status == TaskStatus.PENDING
@@ -190,36 +235,83 @@ class TestApplyTaskEvents:
 
     def test_task_completed(self):
         s = empty_state()
-        s = apply(s, IndexedEvent(event=InstanceCreated(
-            instance_id=InstanceId("i1"), model_id="m", node_ids=[NodeId("n1")], sharding="tensor"
-        ), index=1))
-        s = apply(s, IndexedEvent(event=TaskCreated(
-            task_id=TaskId("t1"), instance_id=InstanceId("i1"), prompt="hello"
-        ), index=2))
-        s = apply(s, IndexedEvent(event=TaskCompleted(task_id=TaskId("t1"), output="world"), index=3))
+        s = apply(
+            s,
+            IndexedEvent(
+                event=InstanceCreated(
+                    instance_id=InstanceId("i1"),
+                    model_id="m",
+                    node_ids=[NodeId("n1")],
+                    sharding="tensor",
+                ),
+                index=1,
+            ),
+        )
+        s = apply(
+            s,
+            IndexedEvent(
+                event=TaskCreated(
+                    task_id=TaskId("t1"), instance_id=InstanceId("i1"), prompt="hello"
+                ),
+                index=2,
+            ),
+        )
+        s = apply(
+            s, IndexedEvent(event=TaskCompleted(task_id=TaskId("t1"), output="world"), index=3)
+        )
         assert s.tasks[TaskId("t1")].status == TaskStatus.COMPLETED
         assert s.tasks[TaskId("t1")].output == "world"
 
     def test_task_failed(self):
         s = empty_state()
-        s = apply(s, IndexedEvent(event=InstanceCreated(
-            instance_id=InstanceId("i1"), model_id="m", node_ids=[NodeId("n1")], sharding="tensor"
-        ), index=1))
-        s = apply(s, IndexedEvent(event=TaskCreated(
-            task_id=TaskId("t1"), instance_id=InstanceId("i1"), prompt="hello"
-        ), index=2))
+        s = apply(
+            s,
+            IndexedEvent(
+                event=InstanceCreated(
+                    instance_id=InstanceId("i1"),
+                    model_id="m",
+                    node_ids=[NodeId("n1")],
+                    sharding="tensor",
+                ),
+                index=1,
+            ),
+        )
+        s = apply(
+            s,
+            IndexedEvent(
+                event=TaskCreated(
+                    task_id=TaskId("t1"), instance_id=InstanceId("i1"), prompt="hello"
+                ),
+                index=2,
+            ),
+        )
         s = apply(s, IndexedEvent(event=TaskFailed(task_id=TaskId("t1"), error="OOM"), index=3))
         assert s.tasks[TaskId("t1")].status == TaskStatus.FAILED
         assert s.tasks[TaskId("t1")].error == "OOM"
 
     def test_task_cancelled(self):
         s = empty_state()
-        s = apply(s, IndexedEvent(event=InstanceCreated(
-            instance_id=InstanceId("i1"), model_id="m", node_ids=[NodeId("n1")], sharding="tensor"
-        ), index=1))
-        s = apply(s, IndexedEvent(event=TaskCreated(
-            task_id=TaskId("t1"), instance_id=InstanceId("i1"), prompt="hello"
-        ), index=2))
+        s = apply(
+            s,
+            IndexedEvent(
+                event=InstanceCreated(
+                    instance_id=InstanceId("i1"),
+                    model_id="m",
+                    node_ids=[NodeId("n1")],
+                    sharding="tensor",
+                ),
+                index=1,
+            ),
+        )
+        s = apply(
+            s,
+            IndexedEvent(
+                event=TaskCreated(
+                    task_id=TaskId("t1"), instance_id=InstanceId("i1"), prompt="hello"
+                ),
+                index=2,
+            ),
+        )
         s = apply(s, IndexedEvent(event=TaskCancelled(task_id=TaskId("t1")), index=3))
         assert s.tasks[TaskId("t1")].status == TaskStatus.CANCELLED
 
@@ -229,14 +321,27 @@ class TestApplyRunnerStatusUpdated:
 
     def test_updates_runner_status(self):
         s = empty_state()
-        s = apply(s, IndexedEvent(event=NodeJoined(node_id=NodeId("n1"), ip="10.0.0.1", port=52415), index=1))
-        s = apply(s, IndexedEvent(event=RunnerStatusUpdated(node_id=NodeId("n1"), status="ready"), index=2))
+        s = apply(
+            s,
+            IndexedEvent(
+                event=NodeJoined(node_id=NodeId("n1"), ip="10.0.0.1", port=52415), index=1
+            ),
+        )
+        s = apply(
+            s,
+            IndexedEvent(event=RunnerStatusUpdated(node_id=NodeId("n1"), status="ready"), index=2),
+        )
         assert s.nodes[NodeId("n1")].runner_status == "ready"
 
     def test_runner_status_on_nonexistent_node(self):
         """不存在的节点更新 runner 状态应被忽略。"""
         s = empty_state()
-        s2 = apply(s, IndexedEvent(event=RunnerStatusUpdated(node_id=NodeId("ghost"), status="ready"), index=1))
+        s2 = apply(
+            s,
+            IndexedEvent(
+                event=RunnerStatusUpdated(node_id=NodeId("ghost"), status="ready"), index=1
+            ),
+        )
         assert len(s2.nodes) == 0
 
 
@@ -245,11 +350,21 @@ class TestApplyDeterminism:
 
     def test_deterministic(self):
         events = [
-            IndexedEvent(event=NodeJoined(node_id=NodeId("n1"), ip="10.0.0.1", port=52415), index=1),
-            IndexedEvent(event=NodeJoined(node_id=NodeId("n2"), ip="10.0.0.2", port=52415), index=2),
-            IndexedEvent(event=InstanceCreated(
-                instance_id=InstanceId("i1"), model_id="m", node_ids=[NodeId("n1")], sharding="tensor"
-            ), index=3),
+            IndexedEvent(
+                event=NodeJoined(node_id=NodeId("n1"), ip="10.0.0.1", port=52415), index=1
+            ),
+            IndexedEvent(
+                event=NodeJoined(node_id=NodeId("n2"), ip="10.0.0.2", port=52415), index=2
+            ),
+            IndexedEvent(
+                event=InstanceCreated(
+                    instance_id=InstanceId("i1"),
+                    model_id="m",
+                    node_ids=[NodeId("n1")],
+                    sharding="tensor",
+                ),
+                index=3,
+            ),
         ]
 
         s_a = empty_state()
@@ -265,11 +380,21 @@ class TestApplyDeterminism:
     def test_event_order_matters(self):
         """不同事件顺序产生不同状态。"""
         s = empty_state()
-        s1 = apply(s, IndexedEvent(event=NodeJoined(node_id=NodeId("n1"), ip="10.0.0.1", port=52415), index=1))
+        s1 = apply(
+            s,
+            IndexedEvent(
+                event=NodeJoined(node_id=NodeId("n1"), ip="10.0.0.1", port=52415), index=1
+            ),
+        )
         s1 = apply(s1, IndexedEvent(event=NodeLeft(node_id=NodeId("n1")), index=2))
 
         s2 = apply(s, IndexedEvent(event=NodeLeft(node_id=NodeId("n1")), index=1))
-        s2 = apply(s2, IndexedEvent(event=NodeJoined(node_id=NodeId("n1"), ip="10.0.0.1", port=52415), index=2))
+        s2 = apply(
+            s2,
+            IndexedEvent(
+                event=NodeJoined(node_id=NodeId("n1"), ip="10.0.0.1", port=52415), index=2
+            ),
+        )
 
         # 先加后删 -> 空；先删后加 -> 有节点
         assert len(s1.nodes) == 0

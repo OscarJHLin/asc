@@ -1,11 +1,11 @@
 """Asc 推理引擎抽象接口。
 
-设计原则（借鉴 exo 的 Engine/Builder 模式）：
+设计原则：
 - Builder 阶段：查找可执行文件、加载模型、预热 -> 返回 Engine
 - Engine 阶段：submit(task) / step() 循环 -> 产出推理结果
 - 构建与运行明确分离
 
-关键改进：
+关键特性：
 - 使用 llama-server 常驻进程 + HTTP API，而非每次启动 llama-cli
 - 天然支持流式输出（SSE）
 - 避免模型冷启动开销
@@ -15,11 +15,11 @@ from __future__ import annotations
 
 import enum
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Generator
 
-
 # --- 值对象 ---
+
 
 @dataclass(frozen=True)
 class InferenceRequest:
@@ -68,6 +68,7 @@ class EngineStatus(enum.Enum):
 
 # --- Builder 抽象 ---
 
+
 class EngineBuilder(ABC):
     """推理引擎构建器。
 
@@ -88,6 +89,7 @@ class EngineBuilder(ABC):
 
 
 # --- Engine 抽象 ---
+
 
 class Engine(ABC):
     """推理引擎运行时接口。

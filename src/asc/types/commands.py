@@ -34,6 +34,7 @@ def command_type(cmd: Command) -> CommandType:
 
 # --- 模型实例命令 ---
 
+
 @dataclass(frozen=True)
 class CreateInstance:
     """创建模型实例。Master 决定放置到哪些节点。"""
@@ -50,6 +51,7 @@ class DeleteInstance:
 
 
 # --- 推理任务命令 ---
+
 
 @dataclass(frozen=True)
 class StartInference:
@@ -69,6 +71,7 @@ class CancelTask:
 
 
 # --- Runner 管理命令 ---
+
 
 @dataclass(frozen=True)
 class ShutdownRunner:

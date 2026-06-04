@@ -8,7 +8,6 @@
 
 from __future__ import annotations
 
-import json
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -22,7 +21,6 @@ from asc.engine.base import (
     EngineBuilder,
     EngineStatus,
     InferenceRequest,
-    InferenceResult,
     LoadProgress,
 )
 
@@ -83,6 +81,7 @@ class LlamaServerBuilder(EngineBuilder):
 
         # 环境变量自定义路径
         import os
+
         custom_path = os.getenv("ASC_LLAMA_PATH")
         if custom_path:
             candidates.insert(0, Path(custom_path) / "llama-server.exe")
@@ -94,6 +93,7 @@ class LlamaServerBuilder(EngineBuilder):
 
         # 系统 PATH
         import shutil
+
         found = shutil.which("llama-server")
         if found:
             return found
@@ -104,10 +104,14 @@ class LlamaServerBuilder(EngineBuilder):
         """启动 llama-server 子进程。"""
         cmd = [
             exe,
-            "-m", self.model_path,
-            "--host", self.host,
-            "--port", str(self.port),
-            "-ngl", str(self.n_gpu_layers),
+            "-m",
+            self.model_path,
+            "--host",
+            self.host,
+            "--port",
+            str(self.port),
+            "-ngl",
+            str(self.n_gpu_layers),
         ]
 
         # 分布式推理参数
@@ -160,9 +164,11 @@ class LlamaServerEngine(Engine):
 
     def status(self) -> EngineStatus:
         # 检查进程是否还活着
-        if self._status in (EngineStatus.READY, EngineStatus.RUNNING):
-            if self.process.poll() is not None:
-                self._status = EngineStatus.ERROR
+        if (
+            self._status in (EngineStatus.READY, EngineStatus.RUNNING)
+            and self.process.poll() is not None
+        ):
+            self._status = EngineStatus.ERROR
         return self._status
 
     def submit(self, request: InferenceRequest) -> str:

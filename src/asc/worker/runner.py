@@ -1,7 +1,6 @@
 """Asc Runner 状态机。
 
 Runner 是 Worker 节点上的推理引擎管理器，实现严格的状态机。
-借鉴 exo 的 Runner 状态机思想，但用更简洁的 Python 实现。
 
 状态机：
     Idle -> Loading -> Ready -> Running -> Ready (循环)

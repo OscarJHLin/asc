@@ -4,7 +4,6 @@
 支持：默认值、JSON 文件加载/保存、环境变量覆盖、运行时修改。
 """
 
-import json
 import os
 import tempfile
 from pathlib import Path

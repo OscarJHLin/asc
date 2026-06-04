@@ -3,9 +3,7 @@
 核心改进：从每次推理启动新进程 -> llama-server 常驻进程 + HTTP API。
 """
 
-import os
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from asc.engine.base import (
     Engine,
@@ -36,7 +34,7 @@ class TestInferenceRequest:
         req = InferenceRequest(prompt="Hi")
         try:
             req.prompt = "Bye"  # type: ignore[misc]
-            assert False, "Should be immutable"
+            raise AssertionError("Should be immutable")
         except (AttributeError, TypeError):
             pass
 
@@ -59,7 +57,7 @@ class TestInferenceResult:
         result = InferenceResult(text="x", tokens_generated=1, tokens_per_second=1.0)
         try:
             result.text = "y"  # type: ignore[misc]
-            assert False, "Should be immutable"
+            raise AssertionError("Should be immutable")
         except (AttributeError, TypeError):
             pass
 

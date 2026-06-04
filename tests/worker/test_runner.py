@@ -108,7 +108,7 @@ class TestRunnerInvalidTransitions:
         runner = Runner(node_id="node-1")
         try:
             runner.transition(RunnerCommand.START_INFERENCE)
-            assert False, "Should raise RunnerTransitionError"
+            raise AssertionError("Should raise RunnerTransitionError")
         except RunnerTransitionError:
             pass
 
@@ -116,7 +116,7 @@ class TestRunnerInvalidTransitions:
         runner = Runner(node_id="node-1")
         try:
             runner.transition(RunnerCommand.INFERENCE_COMPLETE)
-            assert False, "Should raise RunnerTransitionError"
+            raise AssertionError("Should raise RunnerTransitionError")
         except RunnerTransitionError:
             pass
 
@@ -125,7 +125,7 @@ class TestRunnerInvalidTransitions:
         runner.transition(RunnerCommand.LOAD)
         try:
             runner.transition(RunnerCommand.START_INFERENCE)
-            assert False, "Should raise RunnerTransitionError"
+            raise AssertionError("Should raise RunnerTransitionError")
         except RunnerTransitionError:
             pass
 
@@ -136,7 +136,7 @@ class TestRunnerInvalidTransitions:
         runner.transition(RunnerCommand.START_INFERENCE)
         try:
             runner.transition(RunnerCommand.LOAD)
-            assert False, "Should raise RunnerTransitionError"
+            raise AssertionError("Should raise RunnerTransitionError")
         except RunnerTransitionError:
             pass
 
@@ -147,7 +147,7 @@ class TestRunnerInvalidTransitions:
         runner.transition(RunnerCommand.SHUTDOWN)
         try:
             runner.transition(RunnerCommand.LOAD)
-            assert False, "Should raise RunnerTransitionError"
+            raise AssertionError("Should raise RunnerTransitionError")
         except RunnerTransitionError:
             pass
 

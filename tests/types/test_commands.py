@@ -3,16 +3,15 @@
 Command 表达"意图"，可被拒绝。与 Event（表达"已发生的事实"）严格分离。
 """
 
-from asc.types.common import InstanceId, NodeId, TaskId
 from asc.types.commands import (
-    Command,
+    CancelTask,
     CreateInstance,
     DeleteInstance,
-    StartInference,
-    CancelTask,
     ShutdownRunner,
+    StartInference,
     command_type,
 )
+from asc.types.common import InstanceId, NodeId, TaskId
 from asc.types.events import InstanceCreated
 
 
@@ -83,6 +82,7 @@ class TestCommandIsNotEvent:
 
     def test_command_not_event_instance(self):
         from asc.types.events import InstanceCreated
+
         c = CreateInstance(model_id="m", sharding="tensor")
         assert not isinstance(c, InstanceCreated)
 

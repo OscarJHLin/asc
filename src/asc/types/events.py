@@ -38,6 +38,7 @@ def event_type(event: Event) -> EventType:
 
 # --- 集群拓扑事件 ---
 
+
 @dataclass(frozen=True)
 class NodeJoined:
     """节点加入集群。"""
@@ -55,6 +56,7 @@ class NodeLeft:
 
 
 # --- 模型实例事件 ---
+
 
 @dataclass(frozen=True)
 class InstanceCreated:
@@ -74,6 +76,7 @@ class InstanceDeleted:
 
 
 # --- 推理任务事件 ---
+
 
 @dataclass(frozen=True)
 class TaskCreated:
@@ -108,6 +111,7 @@ class TaskCancelled:
 
 
 # --- Runner 状态事件 ---
+
 
 @dataclass(frozen=True)
 class RunnerStatusUpdated:
@@ -148,6 +152,7 @@ _EVENT_TYPE_MAP: dict[type[Event], EventType] = {
 
 
 # --- IndexedEvent ---
+
 
 @dataclass(frozen=True)
 class IndexedEvent:

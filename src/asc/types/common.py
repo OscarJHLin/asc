@@ -19,6 +19,7 @@ EventId = NewType("EventId", str)
 
 # --- ID 生成器 ---
 
+
 def generate_node_id() -> NodeId:
     """生成唯一的节点 ID。"""
     return NodeId(f"node-{uuid.uuid4().hex[:12]}")
@@ -40,6 +41,7 @@ def generate_event_id() -> EventId:
 
 
 # --- 不可变值对象 ---
+
 
 @dataclass(frozen=True)
 class SessionId:
