@@ -62,6 +62,12 @@ class StartInference:
     max_tokens: int = 128
     temperature: float = 0.7
 
+    def __post_init__(self):
+        if self.max_tokens < 1:
+            raise ValueError("max_tokens 必须大于 0")
+        if self.temperature < 0:
+            raise ValueError("temperature 不能为负数")
+
 
 @dataclass(frozen=True)
 class CancelTask:

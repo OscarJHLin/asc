@@ -65,12 +65,14 @@ class PlacementEngine:
             for combo in combinations(nodes, num_nodes):
                 total_vram = sum(n.resources.total_vram_free_mb for n in combo)
                 if total_vram >= model_vram_required_mb:
-                    candidates.append((combo, total_vram))
+                    # 算力评分越高越优先（降序），相同算力时选 VRAM 更小的
+                    total_compute = sum(n.resources.compute_score for n in combo)
+                    candidates.append((combo, total_vram, total_compute))
 
             if candidates:
-                # 选择总 VRAM 最小的组合（资源利用率最高）
-                candidates.sort(key=lambda x: x[1])
-                best_combo, best_vram = candidates[0]
+                # 优先算力评分高，其次总 VRAM 小（资源利用率最高）
+                candidates.sort(key=lambda x: (-x[2], x[1]))
+                best_combo, best_vram, _ = candidates[0]
                 return PlacementResult(
                     success=True,
                     selected_nodes=[n.node_id for n in best_combo],

@@ -10,6 +10,7 @@ Master 负责：
 from __future__ import annotations
 
 from asc.core.event_log import EventLog, MemoryEventLog
+from asc.master.orchestrator import DistributedOrchestrator
 from asc.types import (
     ClusterState,
     IndexedEvent,
@@ -46,11 +47,13 @@ class MasterNode:
         self,
         node_id: str,
         event_log: EventLog | None = None,
+        orchestrator: DistributedOrchestrator | None = None,
     ) -> None:
         self.node_id = node_id
         self._state = empty_state()
         self._next_index = 1
-        self.event_log = event_log or MemoryEventLog()
+        self.event_log = event_log if event_log is not None else MemoryEventLog()
+        self._orchestrator = orchestrator if orchestrator is not None else DistributedOrchestrator()
 
     @property
     def state(self) -> ClusterState:
@@ -74,18 +77,21 @@ class MasterNode:
 
     def process_create_instance(self, cmd: CreateInstance) -> list[Event]:
         """处理创建实例命令。"""
-        # 简化：选择所有在线节点
         node_ids = list(self._state.nodes.keys())
         if not node_ids:
             raise ValueError("无可用节点")
 
         inst_id = generate_instance_id()
+
+        # 简化：直接选择所有节点，实际应通过编排器计算
+        # 预留：集成 DistributedOrchestrator
         return self._emit(
             InstanceCreated(
                 instance_id=inst_id,
                 model_id=cmd.model_id,
                 node_ids=node_ids,
                 sharding=cmd.sharding,
+                rpc_endpoints=[],
             )
         )
 
@@ -93,6 +99,11 @@ class MasterNode:
         """处理删除实例命令。"""
         if cmd.instance_id not in self._state.instances:
             raise ValueError(f"实例 {cmd.instance_id} 不存在")
+
+        # 预留：调用编排器停止 RPC Servers
+        # instance = self._state.instances[cmd.instance_id]
+        # self._orchestrator.delete_instance(...)
+
         return self._emit(InstanceDeleted(instance_id=cmd.instance_id))
 
     def process_start_inference(self, cmd: StartInference) -> list[Event]:

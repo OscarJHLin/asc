@@ -77,7 +77,7 @@ class TestPipelinePlanner:
     def test_single_node(self):
         """单节点应将所有层分配到该节点。"""
         planner = PipelinePlanner()
-        plan = planner.plan(
+        plan = planner.plan_by_vram(
             total_layers=32,
             node_vram_mb={"node-1": 8000},
         )
@@ -88,7 +88,7 @@ class TestPipelinePlanner:
     def test_two_nodes_equal_vram(self):
         """两节点 VRAM 相等应均分层。"""
         planner = PipelinePlanner()
-        plan = planner.plan(
+        plan = planner.plan_by_vram(
             total_layers=32,
             node_vram_mb={"node-1": 8000, "node-2": 8000},
         )
@@ -99,7 +99,7 @@ class TestPipelinePlanner:
     def test_two_nodes_unequal_vram(self):
         """两节点 VRAM 不等应按比例分。"""
         planner = PipelinePlanner()
-        plan = planner.plan(
+        plan = planner.plan_by_vram(
             total_layers=32,
             node_vram_mb={"node-1": 12000, "node-2": 4000},
         )
@@ -111,7 +111,7 @@ class TestPipelinePlanner:
     def test_three_nodes(self):
         """三节点按比例分配。"""
         planner = PipelinePlanner()
-        plan = planner.plan(
+        plan = planner.plan_by_vram(
             total_layers=30,
             node_vram_mb={"n1": 5000, "n2": 3000, "n3": 2000},
         )
@@ -124,7 +124,7 @@ class TestPipelinePlanner:
     def test_layers_sum_to_total(self):
         """所有阶段层数之和应等于总层数。"""
         planner = PipelinePlanner()
-        plan = planner.plan(
+        plan = planner.plan_by_vram(
             total_layers=33,
             node_vram_mb={"n1": 10000, "n2": 6000, "n3": 4000},
         )
@@ -134,7 +134,7 @@ class TestPipelinePlanner:
     def test_stages_contiguous(self):
         """阶段应连续覆盖所有层。"""
         planner = PipelinePlanner()
-        plan = planner.plan(
+        plan = planner.plan_by_vram(
             total_layers=32,
             node_vram_mb={"n1": 8000, "n2": 8000},
         )
@@ -147,16 +147,27 @@ class TestPipelinePlanner:
     def test_empty_nodes(self):
         """无节点应返回空计划。"""
         planner = PipelinePlanner()
-        plan = planner.plan(total_layers=32, node_vram_mb={})
+        plan = planner.plan_by_vram(total_layers=32, node_vram_mb={})
         assert len(plan.stages) == 0
         assert not plan.is_valid
 
     def test_zero_vram_node_excluded(self):
         """VRAM 为 0 的节点应被排除。"""
         planner = PipelinePlanner()
-        plan = planner.plan(
+        plan = planner.plan_by_vram(
             total_layers=32,
             node_vram_mb={"n1": 8000, "n2": 0},
         )
         assert len(plan.stages) == 1
         assert plan.stages[0].node_id == "n1"
+
+    def test_plan_by_compute(self):
+        """按算力比例分配层数。"""
+        planner = PipelinePlanner()
+        plan = planner.plan_by_compute(
+            total_layers=30,
+            node_compute_scores={"n1": 100.0, "n2": 50.0},
+        )
+        assert len(plan.stages) == 2
+        assert plan.stages[0].num_layers == 20
+        assert plan.stages[1].num_layers == 10

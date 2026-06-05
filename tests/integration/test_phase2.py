@@ -23,7 +23,8 @@ from asc.types import (
     apply,
     empty_state,
 )
-from asc.worker.agent import GPUInfo, NodeResources
+from asc.worker.agent import NodeResources
+from asc.worker.gpu_info import GPUInfo
 from asc.worker.runner import Runner, RunnerCommand, RunnerState
 
 

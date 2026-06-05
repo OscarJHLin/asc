@@ -11,7 +11,8 @@
 
 from asc.scheduler.splitter import TensorSplitCalculator
 from asc.scheduler.topology import build_topology
-from asc.worker.agent import GPUInfo, NodeResources
+from asc.worker.agent import NodeResources
+from asc.worker.gpu_info import GPUInfo
 
 
 class TestTensorSplitCalculator:

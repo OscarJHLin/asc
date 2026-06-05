@@ -43,6 +43,16 @@ class NodeInfo:
     runner_status: str = "unknown"
 
 
+class InstanceState(enum.Enum):
+    """模型实例状态。"""
+
+    CREATING = "creating"
+    RUNNING = "running"
+    DEGRADED = "degraded"
+    FAILED = "failed"
+    STOPPED = "stopped"
+
+
 @dataclass(frozen=True)
 class InstanceInfo:
     """模型实例信息。"""
@@ -51,6 +61,8 @@ class InstanceInfo:
     model_id: str
     node_ids: list[NodeId]
     sharding: str
+    state: InstanceState = InstanceState.CREATING
+    rpc_endpoints: list[str] = field(default_factory=list)
 
 
 class TaskStatus(enum.Enum):
@@ -145,6 +157,7 @@ def _apply_instance_created(state: ClusterState, event: InstanceCreated) -> Clus
             model_id=event.model_id,
             node_ids=list(event.node_ids),
             sharding=event.sharding,
+            rpc_endpoints=list(event.rpc_endpoints),
         ),
     }
     return replace(state, instances=new_instances)

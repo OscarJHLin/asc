@@ -11,7 +11,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, Union
 
 from asc.types.common import InstanceId, NodeId, TaskId
@@ -66,6 +66,7 @@ class InstanceCreated:
     model_id: str
     node_ids: list[NodeId]
     sharding: str  # "tensor" | "pipeline"
+    rpc_endpoints: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

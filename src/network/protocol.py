@@ -5,10 +5,10 @@
 """
 
 import json
-import uuid
 import time
+import uuid
 from enum import Enum
-from typing import Dict, Any, Tuple
+from typing import Any, Dict, Tuple
 
 
 class MessageType(Enum):

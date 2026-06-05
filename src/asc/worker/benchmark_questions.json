@@ -1,0 +1,79 @@
+{
+  "version": "1.0.0",
+  "description": "ASC 标准化性能测试问题集，覆盖不同复杂度场景",
+  "model_config": {
+    "recommended_model": "Qwen2.5-1.5B-Instruct",
+    "quantization": "Q4_K_M",
+    "context_length": 4096,
+    "expected_output_tokens": {
+      "min": 50,
+      "max": 300
+    }
+  },
+  "questions": [
+    {
+      "id": "q1_fact_qa",
+      "category": "fact_qa",
+      "difficulty": "easy",
+      "prompt": "请简要回答：太阳系中距离太阳最近的行星是哪一颗？请用一句话说明。",
+      "expected_tokens_range": [30, 80],
+      "description": "简单事实性问答"
+    },
+    {
+      "id": "q2_logic_math",
+      "category": "logic_math",
+      "difficulty": "medium",
+      "prompt": "请计算：一个长方形的长是12厘米，宽是8厘米，如果它的长和宽都增加3厘米，面积增加了多少平方厘米？请写出计算过程。",
+      "expected_tokens_range": [80, 150],
+      "description": "数学逻辑推理"
+    },
+    {
+      "id": "q3_text_summary",
+      "category": "text_summary",
+      "difficulty": "medium",
+      "prompt": "请将以下段落总结为两句话：人工智能是计算机科学的一个分支，致力于创造能够模拟人类智能的系统。这些系统可以学习、推理、感知环境并做出决策。机器学习是人工智能的核心技术之一，它使计算机能够从数据中学习模式而无需明确编程。深度学习是机器学习的一个子集，使用多层神经网络来处理复杂的数据表示。近年来，人工智能在图像识别、自然语言处理、自动驾驶等领域取得了突破性进展。",
+      "expected_tokens_range": [60, 120],
+      "description": "文本摘要生成"
+    },
+    {
+      "id": "q4_creative_writing",
+      "category": "creative_writing",
+      "difficulty": "medium",
+      "prompt": "请写一段100字左右的科幻微小说，主题：人类第一次与外星文明接触。",
+      "expected_tokens_range": [120, 200],
+      "description": "创意文本生成"
+    },
+    {
+      "id": "q5_code_simple",
+      "category": "code_generation",
+      "difficulty": "medium",
+      "prompt": "请用Python编写一个函数，输入一个整数列表，返回列表中所有偶数的和。请包含函数定义和示例调用。",
+      "expected_tokens_range": [80, 150],
+      "description": "简单代码生成"
+    },
+    {
+      "id": "q6_logic_judgment",
+      "category": "logic_judgment",
+      "difficulty": "hard",
+      "prompt": "有三个人A、B、C，他们中一人是骑士（总是说真话），一人是骗子（总是说假话），一人是间谍（可以说真话也可以说假话）。A说：'C是骑士。' B说：'A是骗子。' C说：'我是间谍。' 请问A、B、C的真实身份分别是什么？请详细说明推理过程。",
+      "expected_tokens_range": [150, 300],
+      "description": "复杂逻辑判断"
+    },
+    {
+      "id": "q7_code_algorithm",
+      "category": "code_generation",
+      "difficulty": "hard",
+      "prompt": "请用Python实现快速排序算法，要求包含递归实现和单元测试示例。",
+      "expected_tokens_range": [150, 280],
+      "description": "算法代码生成"
+    },
+    {
+      "id": "q8_multi_step_reasoning",
+      "category": "multi_step_reasoning",
+      "difficulty": "hard",
+      "prompt": "一个水池有两个进水管和一个排水管。甲管单独注满需6小时，乙管单独注满需4小时，排水管单独排空需3小时。如果水池一开始是空的，同时打开三个管子，请问需要多少小时才能注满水池？请写出详细步骤。",
+      "expected_tokens_range": [120, 250],
+      "description": "多步数学推理"
+    }
+  ]
+}

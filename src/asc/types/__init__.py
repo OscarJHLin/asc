@@ -39,6 +39,7 @@ from asc.types.events import (
 from asc.types.state import (
     ClusterState,
     InstanceInfo,
+    InstanceState,
     NodeInfo,
     TaskInfo,
     TaskStatus,
@@ -84,6 +85,7 @@ __all__ = [
     "ClusterState",
     "NodeInfo",
     "InstanceInfo",
+    "InstanceState",
     "TaskInfo",
     "TaskStatus",
     "apply",

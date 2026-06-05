@@ -3,7 +3,9 @@
 Anthropic Messages API 格式与 OpenAI 不同：
 - system 是顶层字段
 - content 是数组格式
-- 流式事件序列：message_start -> content_block_start -> content_block_delta -> content_block_stop -> message_delta -> message_stop
+- 流式事件序列：
+  message_start -> content_block_start -> content_block_delta
+  -> content_block_stop -> message_delta -> message_stop
 """
 
 from asc.api.anthropic_adapter import (
@@ -174,7 +176,8 @@ class TestAnthropicAdapter:
             messages=[{"role": "user", "content": "Hi"}],
         )
         events = list(adapter.create_stream_events(req, ["Hello", " there", "!"]))
-        # message_start + content_block_start + 3 deltas + content_block_stop + message_delta + message_stop
+        # message_start + content_block_start + 3 deltas +
+        # content_block_stop + message_delta + message_stop
         assert len(events) == 8
         assert isinstance(events[0], MessageStartEvent)
         assert isinstance(events[1], ContentBlockStartEvent)

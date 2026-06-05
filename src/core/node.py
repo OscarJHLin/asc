@@ -4,14 +4,15 @@
 管理单个节点的状态、资源和通信
 """
 
-import socket
-import time
 import platform
-import psutil
+import socket
 import subprocess
-from enum import Enum
-from typing import Dict, Any, Optional
+import time
 from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Dict
+
+import psutil
 
 
 class NodeStatus(Enum):

@@ -1,4 +1,4 @@
-"""测试模型管理：HuggingFace 下载 + 进度追踪。"""
+"""测试模型管理：多源下载 + 进度追踪 + 分发。"""
 
 import tempfile
 from pathlib import Path
@@ -9,6 +9,7 @@ from asc.core.model_manager import (
     ModelManager,
     ModelMetadata,
 )
+from asc.core.model_downloader import DownloadSource
 
 
 class TestModelMetadata:
@@ -31,6 +32,12 @@ class TestModelMetadata:
             raise AssertionError("Should be immutable")
         except (AttributeError, TypeError):
             pass
+
+    def test_source_types(self):
+        """支持多种来源标记。"""
+        for source in ("local", "huggingface", "modelscope", "manual", "remote"):
+            meta = ModelMetadata(model_id="m", file_path="/m.gguf", file_size_mb=100, source=source)
+            assert meta.source == source
 
 
 class TestDownloadProgress:
@@ -63,6 +70,12 @@ class TestModelManager:
         mgr.register("my-model", "/path/to/model.gguf")
         assert mgr.resolve("my-model") == "/path/to/model.gguf"
 
+    def test_register_with_source(self):
+        mgr = ModelManager(models_dir=Path("/tmp/models"))
+        mgr.register("hf-model", "/path/to/model.gguf", source="huggingface")
+        models = mgr.list_models()
+        assert models[0].source == "huggingface"
+
     def test_resolve_unknown_returns_none(self):
         mgr = ModelManager(models_dir=Path("/tmp/models"))
         assert mgr.resolve("unknown") is None
@@ -91,25 +104,103 @@ class TestModelManager:
             (models_dir / "qwen-2.5-7b-q8.gguf").write_bytes(b"\x00" * 200)
 
             mgr = ModelManager(models_dir=models_dir)
-            mgr.auto_discover()
+            discovered = mgr.auto_discover()
 
+            assert "llama-3.1-8b-q4" in discovered
+            assert "qwen-2.5-7b-q8" in discovered
             assert mgr.resolve("llama-3.1-8b-q4") is not None
             assert mgr.resolve("qwen-2.5-7b-q8") is not None
+
+    def test_auto_discover_returns_new_only(self):
+        """auto_discover 只返回新发现的模型。"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            models_dir = Path(tmpdir)
+            (models_dir / "model-a.gguf").write_bytes(b"\x00" * 100)
+
+            mgr = ModelManager(models_dir=models_dir)
+            first = mgr.auto_discover()
+            assert "model-a" in first
+
+            second = mgr.auto_discover()
+            assert len(second) == 0
 
     def test_auto_discover_empty_dir(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             mgr = ModelManager(models_dir=Path(tmpdir))
-            mgr.auto_discover()
-            assert len(mgr.list_models()) == 0
+            discovered = mgr.auto_discover()
+            assert len(discovered) == 0
+
+    def test_scan_available_models(self):
+        """扫描可用模型（不依赖注册表）。"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            models_dir = Path(tmpdir)
+            (models_dir / "model-a.gguf").write_bytes(b"\x00" * 100)
+            (models_dir / "model-b.gguf").write_bytes(b"\x00" * 200)
+
+            mgr = ModelManager(models_dir=models_dir)
+            models = mgr.scan_available_models()
+            assert len(models) == 2
 
     @patch("huggingface_hub.hf_hub_download")
     def test_download_from_huggingface(self, mock_download):
         """HuggingFace 下载（mock）。"""
         with tempfile.TemporaryDirectory() as tmpdir:
             mock_download.return_value = str(Path(tmpdir) / "model.gguf")
-            # 创建 mock 文件
             Path(tmpdir, "model.gguf").write_bytes(b"\x00" * 100)
 
             mgr = ModelManager(models_dir=Path(tmpdir))
-            # 验证接口存在
             assert hasattr(mgr, "download")
+
+    def test_models_dir_property(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mgr = ModelManager(models_dir=Path(tmpdir))
+            assert mgr.models_dir == Path(tmpdir)
+
+    def test_downloader_property(self):
+        mgr = ModelManager(models_dir=Path("/tmp/models"))
+        assert mgr.downloader is not None
+
+    def test_distributor_property(self):
+        mgr = ModelManager(models_dir=Path("/tmp/models"))
+        assert mgr.distributor is not None
+
+    def test_download_model_manual(self):
+        """通过统一入口手动下载。"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            models_dir = Path(tmpdir)
+            (models_dir / "test-model.gguf").write_bytes(b"\x00" * 100)
+
+            mgr = ModelManager(models_dir=models_dir)
+            gen = mgr.download_model(
+                source=DownloadSource.MANUAL,
+                model_uri="manual",
+            )
+            try:
+                while True:
+                    next(gen)
+            except StopIteration as e:
+                result = e.value
+
+            assert result.success
+            assert mgr.resolve("test-model") is not None
+
+    def test_distribute_model(self):
+        """分发模型到节点。"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            models_dir = Path(tmpdir)
+            (models_dir / "test-model.gguf").write_bytes(b"\x00" * 100)
+
+            mgr = ModelManager(models_dir=models_dir)
+            from asc.core.model_distributor import DistributionTarget
+
+            targets = [
+                DistributionTarget(node_id="w1", ip="10.0.0.1", port=52415),
+            ]
+            gen = mgr.distribute_model("test-model", targets, send_chunk_fn=None)
+            try:
+                while True:
+                    next(gen)
+            except StopIteration as e:
+                results = e.value
+
+            assert len(results) == 1

@@ -6,18 +6,17 @@
 
 import argparse
 import sys
-import os
 from pathlib import Path
 
 project_root = Path(__file__).parent.parent.parent.resolve()
 sys.path.insert(0, str(project_root))
 
-from src.core.config import Config
 from src.core.cluster import Cluster
-from src.core.node import Node, NodeStatus
+from src.core.config import Config
 from src.core.logging import get_logger
-from src.network.discovery import NodeDiscovery
+from src.core.node import Node
 from src.inference.engine import InferenceEngine
+from src.network.discovery import NodeDiscovery
 from src.ui.server import WebUIServer
 
 logger = get_logger('cli')
@@ -162,7 +161,7 @@ class ASCCLI:
         )
         
         if result.get('success'):
-            print(f"\n推理结果:")
+            print("\n推理结果:")
             output = result['output']
             try:
                 print(output)
@@ -170,7 +169,7 @@ class ASCCLI:
                 encoding = sys.stdout.encoding or 'utf-8'
                 print(output.encode(encoding, errors='replace').decode(encoding))
             
-            print(f"\n统计:")
+            print("\n统计:")
             print(f"  生成token数: {result.get('tokens_generated', 0)}")
             print(f"  耗时: {result.get('elapsed_time', 0):.2f}s")
             print(f"  速度: {result.get('tokens_per_sec', 0):.2f} tokens/s")
@@ -194,7 +193,7 @@ class ASCCLI:
         print(f"总内存: {info['total_memory_mb']} MB")
         
         engine_status = self.engine.get_status()
-        print(f"\n推理引擎:")
+        print("\n推理引擎:")
         print(f"  后端: {engine_status['backend']}")
         print(f"  llama-cli: {'可用' if engine_status['llama_cli_available'] else '不可用'}")
         print(f"  llama-server: {'可用' if engine_status['llama_server_available'] else '不可用'}")

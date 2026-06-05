@@ -5,6 +5,6 @@ ASC 网络通信模块
 """
 
 from .discovery import NodeDiscovery
-from .protocol import Message, TaskMessage, MessageType, TaskType, ProtocolValidator
+from .protocol import Message, MessageType, ProtocolValidator, TaskMessage, TaskType
 
 __all__ = ['NodeDiscovery', 'Message', 'TaskMessage', 'MessageType', 'TaskType', 'ProtocolValidator']

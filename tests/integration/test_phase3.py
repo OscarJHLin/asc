@@ -19,7 +19,8 @@ from asc.types import (
     TaskCreated,
 )
 from asc.types.commands import CreateInstance, StartInference
-from asc.worker.agent import GPUInfo, NodeResources
+from asc.worker.agent import NodeResources
+from asc.worker.gpu_info import GPUInfo
 
 
 class TestAPIAdaptersWithMaster:
@@ -184,7 +185,7 @@ class TestPipelineWithPlacement:
 
         # 3. Pipeline 分片
         planner = PipelinePlanner()
-        plan = planner.plan(
+        plan = planner.plan_by_vram(
             total_layers=32,
             node_vram_mb={"n1": 12000, "n2": 8000},
         )

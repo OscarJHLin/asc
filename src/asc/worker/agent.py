@@ -11,7 +11,6 @@ Worker Agent 运行在 Worker 节点上，提供：
 
 from __future__ import annotations
 
-import contextlib
 import os
 import shutil
 import subprocess
@@ -21,19 +20,10 @@ from typing import Any
 
 import psutil
 
-
-@dataclass(frozen=True)
-class GPUInfo:
-    """GPU 信息。"""
-
-    index: int
-    name: str
-    vram_total_mb: int
-    vram_free_mb: int
-
-    @property
-    def vram_used_mb(self) -> int:
-        return self.vram_total_mb - self.vram_free_mb
+from asc.worker.benchmark_score import BenchmarkScore
+from asc.worker.gpu_info import GPUInfo
+from asc.worker.hardware import HardwareDetector
+from asc.worker.rpc_server import RpcServer
 
 
 @dataclass(frozen=True)
@@ -45,6 +35,12 @@ class NodeResources:
     memory_total_mb: int
     memory_free_mb: int
     gpus: list[GPUInfo] = field(default_factory=list)
+    compute_score: float = 0.0
+    cpu_physical_count: int = 0
+    cpu_freq_mhz: float = 0.0
+    cpu_brand: str = ""
+    disk_free_mb: int = 0
+    network_mbps: float = 0.0
 
     @property
     def total_vram_free_mb(self) -> int:
@@ -137,10 +133,20 @@ class WorkerAgent:
     通过 HTTP API 对外暴露。
     """
 
-    def __init__(self, node_id: str, port: int = 52415) -> None:
+    def __init__(
+        self,
+        node_id: str,
+        port: int = 52415,
+        benchmark_score: BenchmarkScore | None = None,
+        hardware_detector: HardwareDetector | None = None,
+        rpc_server: RpcServer | None = None,
+    ) -> None:
         self.node_id = node_id
         self.port = port
         self._rpc_manager = RPCServerManager()
+        self._rpc_server = rpc_server or RpcServer()
+        self._benchmark_score = benchmark_score or BenchmarkScore(node_id=node_id)
+        self._hardware_detector = hardware_detector or HardwareDetector()
 
     def health(self) -> dict[str, Any]:
         """健康检查。"""
@@ -155,7 +161,16 @@ class WorkerAgent:
         cpu_percent = psutil.cpu_percent(interval=0.1)
         mem = psutil.virtual_memory()
 
-        gpus = self._detect_gpus()
+        cpu_info = self._hardware_detector.detect_cpu()
+        gpus = self._hardware_detector.detect_gpus()
+        disk = self._hardware_detector.detect_disk()
+        network = self._hardware_detector.detect_network()
+
+        try:
+            report = self._benchmark_score.run_benchmark()
+            compute_score = report.relative_score
+        except Exception:
+            compute_score = 0.0
 
         return NodeResources(
             cpu_count=cpu_count,
@@ -163,123 +178,35 @@ class WorkerAgent:
             memory_total_mb=int(mem.total // (1024 * 1024)),
             memory_free_mb=int(mem.available // (1024 * 1024)),
             gpus=gpus,
+            compute_score=compute_score,
+            cpu_physical_count=cpu_info.physical_count,
+            cpu_freq_mhz=cpu_info.freq_mhz,
+            cpu_brand=cpu_info.brand,
+            disk_free_mb=disk.free_mb,
+            network_mbps=network.estimated_mbps,
         )
 
-    def start_rpc(self, host: str = "0.0.0.0", port: int = 50052) -> dict[str, Any]:
-        """启动 RPC Server。"""
+    def start_rpc(self, port: int | None = None) -> dict[str, Any]:
+        """启动 RPC Server。
+
+        Args:
+            port: 指定端口，None 则自动分配
+        """
         try:
-            self._rpc_manager.start(host=host, port=port)
-            return {"status": "ok", "port": port}
-        except FileNotFoundError as e:
+            assigned_port = self._rpc_server.start(port=port)
+            return {"status": "ok", "port": assigned_port, "endpoint": self._rpc_server.endpoint}
+        except (FileNotFoundError, RuntimeError) as e:
             return {"status": "error", "error": str(e)}
 
     def stop_rpc(self) -> dict[str, Any]:
         """停止 RPC Server。"""
-        self._rpc_manager.stop()
+        self._rpc_server.stop()
         return {"status": "ok"}
 
     def rpc_status(self) -> dict[str, Any]:
         """查询 RPC Server 状态。"""
-        return self._rpc_manager.status()
+        return self._rpc_server.status()
 
-    def _detect_gpus(self) -> list[GPUInfo]:
-        """检测 GPU 信息。"""
-        import platform
 
-        system = platform.system()
 
-        if system == "Windows":
-            return self._detect_gpus_windows()
-        elif system == "Linux":
-            return self._detect_gpus_linux()
-        elif system == "Darwin":
-            return self._detect_gpus_darwin()
-        return []
 
-    def _detect_gpus_windows(self) -> list[GPUInfo]:
-        """Windows GPU 检测（nvidia-smi 优先）。"""
-        gpus = self._parse_nvidia_smi()
-        return gpus
-
-    def _detect_gpus_linux(self) -> list[GPUInfo]:
-        """Linux GPU 检测。"""
-        gpus = self._parse_nvidia_smi()
-        if not gpus:
-            gpus = self._parse_rocm_smi()
-        return gpus
-
-    def _detect_gpus_darwin(self) -> list[GPUInfo]:
-        """macOS GPU 检测（Metal）。"""
-        # 简化实现：通过 system_profiler 获取
-        gpus = []
-        try:
-            result = subprocess.run(
-                ["system_profiler", "SPDisplaysDataType", "-json"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if result.returncode == 0:
-                import json
-
-                data = json.loads(result.stdout)
-                for i, display in enumerate(data.get("SPDisplaysDataType", [])):
-                    name = display.get("sppci_model", "Apple GPU")
-                    # Apple Silicon 统一内存，从 psutil 推算
-                    mem = psutil.virtual_memory()
-                    vram_total = int(mem.total // (1024 * 1024))
-                    vram_free = int(mem.available // (1024 * 1024))
-                    gpus.append(
-                        GPUInfo(
-                            index=i,
-                            name=name,
-                            vram_total_mb=vram_total,
-                            vram_free_mb=vram_free,
-                        )
-                    )
-        except Exception:
-            pass
-        return gpus
-
-    def _parse_nvidia_smi(self) -> list[GPUInfo]:
-        """解析 nvidia-smi 输出。"""
-        gpus = []
-        try:
-            result = subprocess.run(
-                [
-                    "nvidia-smi",
-                    "--query-gpu=index,name,memory.total,memory.free",
-                    "--format=csv,noheader,nounits",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if result.returncode == 0:
-                for line in result.stdout.strip().split("\n"):
-                    parts = [p.strip() for p in line.split(",")]
-                    if len(parts) >= 4:
-                        gpus.append(
-                            GPUInfo(
-                                index=int(parts[0]),
-                                name=parts[1],
-                                vram_total_mb=int(float(parts[2])),
-                                vram_free_mb=int(float(parts[3])),
-                            )
-                        )
-        except Exception:
-            pass
-        return gpus
-
-    def _parse_rocm_smi(self) -> list[GPUInfo]:
-        """解析 rocm-smi 输出。"""
-        gpus = []
-        with contextlib.suppress(Exception):
-            subprocess.run(
-                ["rocm-smi", "--showmeminfo", "vram", "--csv"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            # 简化解析
-        return gpus

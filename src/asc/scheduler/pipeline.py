@@ -1,7 +1,7 @@
 """Asc Pipeline Parallel 分片。
 
 将模型按层切分到不同节点，每个节点负责一部分层的计算，
-形成流水线。按各节点 VRAM 比例分配层数。
+形成流水线。支持按 VRAM 或算力比例分配层数。
 """
 
 from __future__ import annotations
@@ -44,44 +44,57 @@ class PipelinePlan:
 class PipelinePlanner:
     """Pipeline 分片规划器。
 
-    按各节点 VRAM 比例分配层数，确保：
+    支持按 VRAM 或算力比例分配层数，确保：
     - 所有阶段层数之和 = 总层数
     - 阶段连续覆盖 0 ~ total_layers-1
-    - VRAM 为 0 的节点被排除
+    - 权重为 0 的节点被排除
     """
 
-    def plan(
+    def plan_by_vram(
         self,
         total_layers: int,
         node_vram_mb: dict[str, int],
+    ) -> PipelinePlan:
+        """按 VRAM 比例分配层数。"""
+        return self._plan(total_layers, node_vram_mb)
+
+    def plan_by_compute(
+        self,
+        total_layers: int,
+        node_compute_scores: dict[str, float],
+    ) -> PipelinePlan:
+        """按算力评分比例分配层数。"""
+        return self._plan(total_layers, node_compute_scores)
+
+    def _plan(
+        self,
+        total_layers: int,
+        node_weights: dict[str, float],
     ) -> PipelinePlan:
         """计算 Pipeline 分片方案。
 
         Args:
             total_layers: 模型总层数
-            node_vram_mb: 各节点空闲 VRAM {node_id: vram_mb}
+            node_weights: 各节点权重 {node_id: weight}
 
         Returns:
             PipelinePlan
         """
-        # 过滤 VRAM > 0 的节点
-        active = {nid: vram for nid, vram in node_vram_mb.items() if vram > 0}
+        active = {nid: w for nid, w in node_weights.items() if w > 0}
         if not active:
             return PipelinePlan(stages=[], total_layers=total_layers)
 
-        total_vram = sum(active.values())
+        total_weight = sum(active.values())
         stages: list[PipelineStage] = []
         remaining = total_layers
-        sorted_nodes = list(active.keys())
+        sorted_nodes = sorted(active.keys())
 
         for i, node_id in enumerate(sorted_nodes):
             is_last = i == len(sorted_nodes) - 1
             if is_last:
-                # 最后一个节点分配剩余所有层，避免舍入误差
                 num = remaining
             else:
-                # 按 VRAM 比例分配，至少 1 层
-                num = max(1, round(total_layers * active[node_id] / total_vram))
+                num = max(1, round(total_layers * active[node_id] / total_weight))
                 remaining -= num
 
             start = 0 if not stages else stages[-1].end_layer + 1

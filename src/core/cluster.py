@@ -6,9 +6,10 @@
 
 import threading
 import time
-from typing import Dict, List, Optional, Callable
-from .node import Node, NodeStatus
+from typing import Callable, Dict, List, Optional
+
 from .config import Config
+from .node import Node, NodeStatus
 
 
 class Cluster:
