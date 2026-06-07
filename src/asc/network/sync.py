@@ -19,6 +19,37 @@ from typing import Callable
 CHUNK_SIZE: int = 10 * 1024 * 1024  # 10MB
 
 
+def _validate_model_id(model_id: str) -> None:
+    """验证 model_id 安全性，防止路径遍历。
+
+    Raises:
+        ValueError: model_id 包含路径遍历字符
+    """
+    if not model_id:
+        raise ValueError("model_id 不能为空")
+    for char in ["..", "/", "\\", "\x00"]:
+        if char in model_id:
+            raise ValueError(f"model_id 包含非法字符: {char!r}")
+
+
+def _safe_model_path(models_dir: Path, model_id: str) -> Path:
+    """安全拼接模型路径，验证解析后路径仍在 models_dir 内。
+
+    Raises:
+        ValueError: 路径遍历攻击
+    """
+    _validate_model_id(model_id)
+    file_path = models_dir / f"{model_id}.gguf"
+    # 验证解析后路径仍在 models_dir 内
+    resolved = file_path.resolve()
+    models_dir_resolved = models_dir.resolve()
+    try:
+        resolved.relative_to(models_dir_resolved)
+    except ValueError:
+        raise ValueError(f"路径遍历检测: {model_id}") from None
+    return resolved
+
+
 @dataclass(frozen=True)
 class ChunkInfo:
     """分片信息。"""
@@ -87,11 +118,13 @@ def compute_chunk_sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def split_file_into_chunks(file_path: str | Path) -> list[ChunkInfo]:
-    """将文件分割为分片信息列表。"""
+def split_file_into_chunks_with_data(
+    file_path: str | Path,
+) -> list[tuple[ChunkInfo, bytes]]:
+    """将文件分割为分片信息列表，同时返回分片数据（单次 I/O）。"""
     path = Path(file_path)
     total_size = path.stat().st_size
-    chunks: list[ChunkInfo] = []
+    result: list[tuple[ChunkInfo, bytes]] = []
 
     offset = 0
     index = 0
@@ -101,18 +134,45 @@ def split_file_into_chunks(file_path: str | Path) -> list[ChunkInfo]:
             f.seek(offset)
             data = f.read(size)
             sha = compute_chunk_sha256(data)
-            chunks.append(
-                ChunkInfo(
-                    chunk_index=index,
-                    offset=offset,
-                    size=size,
-                    sha256=sha,
-                )
+            chunk_info = ChunkInfo(
+                chunk_index=index,
+                offset=offset,
+                size=size,
+                sha256=sha,
             )
+            result.append((chunk_info, data))
             offset += size
             index += 1
 
-    return chunks
+    return result
+
+
+def split_file_into_chunks(file_path: str | Path) -> list[ChunkInfo]:
+    """将文件分割为分片信息列表（不预读数据，不计算 SHA256）。
+
+    分片信息中的 sha256 字段为空字符串，调用方应在传输/验证时
+    使用 compute_chunk_sha256() 自行计算。若需预计算 SHA256，
+    请使用 split_file_into_chunks_with_data()。
+    """
+    path = Path(file_path)
+    total_size = path.stat().st_size
+    result: list[ChunkInfo] = []
+
+    offset = 0
+    index = 0
+    while offset < total_size:
+        size = min(CHUNK_SIZE, total_size - offset)
+        chunk_info = ChunkInfo(
+            chunk_index=index,
+            offset=offset,
+            size=size,
+            sha256="",  # 延迟计算，调用方应自行验证
+        )
+        result.append(chunk_info)
+        offset += size
+        index += 1
+
+    return result
 
 
 def read_chunk(file_path: str | Path, chunk: ChunkInfo) -> bytes:
@@ -177,12 +237,17 @@ class ModelSyncProtocol:
         Returns:
             (分片列表, 文件 SHA256)
         """
-        file_path = self._models_dir / f"{model_id}.gguf"
+        file_path = _safe_model_path(self._models_dir, model_id)
         if not file_path.exists():
             raise FileNotFoundError(f"模型文件不存在: {file_path}")
 
-        chunks = split_file_into_chunks(file_path)
-        file_sha = compute_file_sha256(file_path)
+        chunks_with_data = split_file_into_chunks_with_data(file_path)
+        chunks = [info for info, _data in chunks_with_data]
+        # 利用已读取的数据计算文件 SHA256，避免二次 I/O
+        h = hashlib.sha256()
+        for _info, data in chunks_with_data:
+            h.update(data)
+        file_sha = h.hexdigest()
         return chunks, file_sha
 
     def get_chunk_data(
@@ -191,7 +256,7 @@ class ModelSyncProtocol:
         chunk: ChunkInfo,
     ) -> bytes:
         """获取指定分片的数据。"""
-        file_path = self._models_dir / f"{model_id}.gguf"
+        file_path = _safe_model_path(self._models_dir, model_id)
         return read_chunk(file_path, chunk)
 
     def init_receive(
@@ -212,7 +277,7 @@ class ModelSyncProtocol:
         Returns:
             ReceiveState 接收状态对象
         """
-        file_path = self._models_dir / f"{model_id}.gguf"
+        file_path = _safe_model_path(self._models_dir, model_id)
         return ReceiveState(
             model_id=model_id,
             file_path=file_path,
@@ -246,6 +311,7 @@ class ReceiveState:
         self.file_sha256 = file_sha256
         self._protocol = protocol
         self._completed: set[int] = set()
+        self._received_bytes: int = 0
 
         # 预分配文件
         file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -256,6 +322,16 @@ class ReceiveState:
     @property
     def is_complete(self) -> bool:
         return len(self._completed) == len(self.chunks)
+
+    @property
+    def completed_chunks(self) -> set[int]:
+        """已完成的分片索引集合（只读副本）。"""
+        return self._completed.copy()
+
+    @property
+    def completed_count(self) -> int:
+        """已完成的分片数量。"""
+        return len(self._completed)
 
     @property
     def missing_chunks(self) -> list[ChunkInfo]:
@@ -272,13 +348,13 @@ class ReceiveState:
 
         write_chunk(self.file_path, chunk, data)
         self._completed.add(chunk.chunk_index)
+        self._received_bytes += chunk.size
 
-        downloaded = sum(c.size for c in self.chunks if c.chunk_index in self._completed)
         self._protocol._report_progress(
             SyncProgress(
                 model_id=self.model_id,
                 total_bytes=self.total_bytes,
-                downloaded_bytes=downloaded,
+                downloaded_bytes=self._received_bytes,
                 total_chunks=len(self.chunks),
                 completed_chunks=len(self._completed),
             )
@@ -333,6 +409,10 @@ class ReceiveState:
                     line = f.readline().strip()
                     if line:
                         self._completed.add(int(line))
+                # 从已完成的分片重新计算 _received_bytes
+                self._received_bytes = sum(
+                    c.size for c in self.chunks if c.chunk_index in self._completed
+                )
             return True
         except (ValueError, struct.error, OSError):
             return False

@@ -49,29 +49,32 @@ class TestMessageRouterSubscribe:
 class TestMessageRouterPublish:
     """发布消息。"""
 
-    def test_publish_calls_subscribers(self):
+    @pytest.mark.asyncio
+    async def test_publish_calls_subscribers(self):
         router = MessageRouter(node_id="n1")
         handler = MagicMock()
         router.subscribe(Channel.EVENTS, handler)
 
         msg = Message(type=MessageType.NODE_JOINED, sender_id="n2", payload={})
         env = Envelope(channel=Channel.EVENTS, message=msg)
-        router.publish_local(env)
+        await router.publish_local(env)
 
         handler.assert_called_once_with(env)
 
-    def test_publish_to_wrong_channel_does_not_call(self):
+    @pytest.mark.asyncio
+    async def test_publish_to_wrong_channel_does_not_call(self):
         router = MessageRouter(node_id="n1")
         handler = MagicMock()
         router.subscribe(Channel.EVENTS, handler)
 
         msg = Message(type=MessageType.HEARTBEAT, sender_id="n2", payload={})
         env = Envelope(channel=Channel.HEARTBEATS, message=msg)
-        router.publish_local(env)
+        await router.publish_local(env)
 
         handler.assert_not_called()
 
-    def test_publish_calls_all_subscribers_on_channel(self):
+    @pytest.mark.asyncio
+    async def test_publish_calls_all_subscribers_on_channel(self):
         router = MessageRouter(node_id="n1")
         h1, h2 = MagicMock(), MagicMock()
         router.subscribe(Channel.EVENTS, h1)
@@ -79,17 +82,18 @@ class TestMessageRouterPublish:
 
         msg = Message(type=MessageType.NODE_JOINED, sender_id="n2", payload={})
         env = Envelope(channel=Channel.EVENTS, message=msg)
-        router.publish_local(env)
+        await router.publish_local(env)
 
         h1.assert_called_once_with(env)
         h2.assert_called_once_with(env)
 
-    def test_publish_no_subscribers_is_noop(self):
+    @pytest.mark.asyncio
+    async def test_publish_no_subscribers_is_noop(self):
         router = MessageRouter(node_id="n1")
         msg = Message(type=MessageType.HEARTBEAT, sender_id="n2", payload={})
         env = Envelope(channel=Channel.HEARTBEATS, message=msg)
         # 不应抛异常
-        router.publish_local(env)
+        await router.publish_local(env)
 
 
 class TestMessageRouterRemotePublish:
@@ -121,18 +125,20 @@ class TestMessageRouterRemotePublish:
 class TestMessageRouterIncoming:
     """处理收到的远程消息。"""
 
-    def test_handle_incoming_dispatches_to_channel(self):
+    @pytest.mark.asyncio
+    async def test_handle_incoming_dispatches_to_channel(self):
         router = MessageRouter(node_id="n1")
         handler = MagicMock()
         router.subscribe(Channel.EVENTS, handler)
 
         msg = Message(type=MessageType.NODE_JOINED, sender_id="n2", payload={"ip": "10.0.0.1"})
         env = Envelope(channel=Channel.EVENTS, message=msg)
-        router.handle_incoming(env)
+        await router.handle_incoming(env)
 
         handler.assert_called_once_with(env)
 
-    def test_handle_incoming_ignores_own_messages(self):
+    @pytest.mark.asyncio
+    async def test_handle_incoming_ignores_own_messages(self):
         """忽略自己发出的消息。"""
         router = MessageRouter(node_id="n1")
         handler = MagicMock()
@@ -140,6 +146,6 @@ class TestMessageRouterIncoming:
 
         msg = Message(type=MessageType.NODE_JOINED, sender_id="n1", payload={})
         env = Envelope(channel=Channel.EVENTS, message=msg)
-        router.handle_incoming(env)
+        await router.handle_incoming(env)
 
         handler.assert_not_called()

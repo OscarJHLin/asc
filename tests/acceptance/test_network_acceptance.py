@@ -153,8 +153,8 @@ class TestEncodeDecodeEnvelope:
         assert env2.message.timestamp == 12345.0
 
     def test_decode_invalid_json(self):
-        """无效 JSON 应抛出异常。"""
-        with pytest.raises(json.JSONDecodeError):
+        """无效数据应抛出 ValueError。"""
+        with pytest.raises(ValueError):
             decode_envelope(b"not json")
 
     def test_decode_invalid_channel(self):
@@ -274,17 +274,19 @@ class TestProtocolBoundary:
 class TestMessageRouterSubscribe:
     """MessageRouter 订阅测试。"""
 
-    def test_subscribe_and_publish(self):
+    @pytest.mark.asyncio
+    async def test_subscribe_and_publish(self):
         router = MessageRouter(node_id="node-1")
         received = []
         router.subscribe(Channel.EVENTS, lambda env: received.append(env))
 
         msg = Message(type=MessageType.NODE_JOINED, sender_id="node-2", payload={})
         env = Envelope(channel=Channel.EVENTS, message=msg)
-        router.publish_local(env)
+        await router.publish_local(env)
         assert len(received) == 1
 
-    def test_multiple_subscribers(self):
+    @pytest.mark.asyncio
+    async def test_multiple_subscribers(self):
         router = MessageRouter(node_id="node-1")
         received_a = []
         received_b = []
@@ -293,11 +295,12 @@ class TestMessageRouterSubscribe:
 
         msg = Message(type=MessageType.NODE_JOINED, sender_id="node-2", payload={})
         env = Envelope(channel=Channel.EVENTS, message=msg)
-        router.publish_local(env)
+        await router.publish_local(env)
         assert len(received_a) == 1
         assert len(received_b) == 1
 
-    def test_channel_isolation(self):
+    @pytest.mark.asyncio
+    async def test_channel_isolation(self):
         """不同通道的消息互不干扰。"""
         router = MessageRouter(node_id="node-1")
         events_received = []
@@ -307,22 +310,24 @@ class TestMessageRouterSubscribe:
 
         msg = Message(type=MessageType.NODE_JOINED, sender_id="node-2", payload={})
         env = Envelope(channel=Channel.EVENTS, message=msg)
-        router.publish_local(env)
+        await router.publish_local(env)
         assert len(events_received) == 1
         assert len(commands_received) == 0
 
-    def test_no_subscribers(self):
+    @pytest.mark.asyncio
+    async def test_no_subscribers(self):
         """无订阅者发布不报错。"""
         router = MessageRouter(node_id="node-1")
         msg = Message(type=MessageType.HEARTBEAT, sender_id="node-1", payload={})
         env = Envelope(channel=Channel.HEARTBEATS, message=msg)
-        router.publish_local(env)  # 不应抛异常
+        await router.publish_local(env)  # 不应抛异常
 
 
 class TestMessageRouterUnsubscribe:
     """MessageRouter 取消订阅测试。"""
 
-    def test_unsubscribe(self):
+    @pytest.mark.asyncio
+    async def test_unsubscribe(self):
         router = MessageRouter(node_id="node-1")
         received = []
         def handler(env):
@@ -332,7 +337,7 @@ class TestMessageRouterUnsubscribe:
 
         msg = Message(type=MessageType.NODE_JOINED, sender_id="node-2", payload={})
         env = Envelope(channel=Channel.EVENTS, message=msg)
-        router.publish_local(env)
+        await router.publish_local(env)
         assert len(received) == 0
 
     def test_unsubscribe_nonexistent_handler(self):
@@ -349,7 +354,8 @@ class TestMessageRouterUnsubscribe:
 class TestMessageRouterLoopDetection:
     """MessageRouter 回环检测测试。"""
 
-    def test_handle_incoming_ignores_self(self):
+    @pytest.mark.asyncio
+    async def test_handle_incoming_ignores_self(self):
         """忽略自己发出的消息。"""
         router = MessageRouter(node_id="node-1")
         received = []
@@ -357,10 +363,11 @@ class TestMessageRouterLoopDetection:
 
         msg = Message(type=MessageType.NODE_JOINED, sender_id="node-1", payload={})
         env = Envelope(channel=Channel.EVENTS, message=msg)
-        router.handle_incoming(env)
+        await router.handle_incoming(env)
         assert len(received) == 0
 
-    def test_handle_incoming_accepts_others(self):
+    @pytest.mark.asyncio
+    async def test_handle_incoming_accepts_others(self):
         """接受其他节点发出的消息。"""
         router = MessageRouter(node_id="node-1")
         received = []
@@ -368,7 +375,7 @@ class TestMessageRouterLoopDetection:
 
         msg = Message(type=MessageType.NODE_JOINED, sender_id="node-2", payload={})
         env = Envelope(channel=Channel.EVENTS, message=msg)
-        router.handle_incoming(env)
+        await router.handle_incoming(env)
         assert len(received) == 1
 
 

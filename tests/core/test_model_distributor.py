@@ -3,6 +3,8 @@
 import tempfile
 from pathlib import Path
 
+import pytest
+
 from asc.core.model_distributor import (
     DistributionResult,
     DistributionTarget,
@@ -92,24 +94,21 @@ class TestModelDistributor:
             assert "llama-3.1-8b" in ids
             assert "qwen-2.5-7b" in ids
 
-    def test_distribute_model_not_found(self):
+    @pytest.mark.asyncio
+    async def test_distribute_model_not_found(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             dist = ModelDistributor(Path(tmpdir))
             targets = [
                 DistributionTarget(node_id="w1", ip="10.0.0.1", port=52415),
             ]
-            gen = dist.distribute("nonexistent", targets)
-            try:
-                while True:
-                    next(gen)
-            except StopIteration as e:
-                results = e.value
+            results = await dist.distribute("nonexistent", targets)
 
             assert len(results) == 1
             assert not results[0].success
             assert "未找到模型文件" in results[0].error
 
-    def test_distribute_no_send_callback(self):
+    @pytest.mark.asyncio
+    async def test_distribute_no_send_callback(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             models_dir = Path(tmpdir)
             (models_dir / "test-model.gguf").write_bytes(b"\x00" * 100)
@@ -118,18 +117,14 @@ class TestModelDistributor:
             targets = [
                 DistributionTarget(node_id="w1", ip="10.0.0.1", port=52415),
             ]
-            gen = dist.distribute("test-model", targets, send_chunk_fn=None)
-            try:
-                while True:
-                    next(gen)
-            except StopIteration as e:
-                results = e.value
+            results = await dist.distribute("test-model", targets, send_chunk_fn=None)
 
             assert len(results) == 1
             assert not results[0].success
             assert "未配置发送回调" in results[0].error
 
-    def test_distribute_with_callback(self):
+    @pytest.mark.asyncio
+    async def test_distribute_with_callback(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             models_dir = Path(tmpdir)
             # 创建一个大于 10MB 的文件以确保有分片
@@ -145,18 +140,42 @@ class TestModelDistributor:
             def send_chunk(node_id, chunk_info, data):
                 return True
 
-            gen = dist.distribute("big-model", targets, send_chunk_fn=send_chunk)
-            progress = []
-            try:
-                while True:
-                    progress.append(next(gen))
-            except StopIteration as e:
-                results = e.value
+            results = await dist.distribute("big-model", targets, send_chunk_fn=send_chunk)
 
             assert len(results) == 2
             assert all(r.success for r in results)
             assert results[0].target_node_id == "w1"
             assert results[1].target_node_id == "w2"
+
+    @pytest.mark.asyncio
+    async def test_distribute_with_progress_callback(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            models_dir = Path(tmpdir)
+            (models_dir / "big-model.gguf").write_bytes(b"\x00" * (11 * 1024 * 1024))
+
+            dist = ModelDistributor(models_dir)
+            targets = [
+                DistributionTarget(node_id="w1", ip="10.0.0.1", port=52415),
+            ]
+
+            progress_items = []
+
+            def on_progress(info):
+                progress_items.append(info)
+
+            def send_chunk(node_id, chunk_info, data):
+                return True
+
+            results = await dist.distribute(
+                "big-model", targets,
+                send_chunk_fn=send_chunk,
+                on_progress=on_progress,
+            )
+
+            assert len(results) == 1
+            assert results[0].success
+            assert len(progress_items) > 0
+            assert progress_items[0]["stage"] == "preparing"
 
     def test_find_model_file_exact(self):
         with tempfile.TemporaryDirectory() as tmpdir:

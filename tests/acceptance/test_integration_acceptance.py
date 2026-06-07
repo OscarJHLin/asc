@@ -358,13 +358,16 @@ class TestAuth:
     """API 认证测试。"""
 
     def test_no_env_key_allows(self, monkeypatch):
-        """未配置 ASC_API_KEY 时跳过认证。"""
+        """未配置 ASC_API_KEY 且 ASC_ALLOW_NO_AUTH=1 时允许免认证。"""
         monkeypatch.delenv("ASC_API_KEY", raising=False)
+        monkeypatch.setenv("ASC_ALLOW_NO_AUTH", "1")
         from asc.api.auth import require_api_key
         assert require_api_key() is True
 
     def test_no_env_key_any_key(self, monkeypatch):
+        """未配置 ASC_API_KEY 且 ASC_ALLOW_NO_AUTH=1 时任何 key 都允许。"""
         monkeypatch.delenv("ASC_API_KEY", raising=False)
+        monkeypatch.setenv("ASC_ALLOW_NO_AUTH", "1")
         from asc.api.auth import require_api_key
         assert require_api_key("any-key") is True
 
@@ -640,11 +643,10 @@ class TestAPIServer:
 
     @pytest.mark.asyncio
     async def test_chat_completions_no_engine(self, monkeypatch):
-        """没有推理引擎时返回 503。"""
-        monkeypatch.delenv("ASC_API_KEY", raising=False)
         from httpx import ASGITransport, AsyncClient
 
         from asc.api.server import create_app
+        monkeypatch.setenv("ASC_ALLOW_NO_AUTH", "1")
         app = create_app()
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -658,25 +660,27 @@ class TestAPIServer:
             assert resp.status_code == 503
 
     @pytest.mark.asyncio
-    async def test_admin_nodes_endpoint(self):
+    async def test_admin_nodes_endpoint(self, monkeypatch):
         from httpx import ASGITransport, AsyncClient
 
         from asc.api.server import create_app
+        monkeypatch.setenv("ASC_API_KEY", "test-key")
         app = create_app()
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.get("/admin/nodes")
+            resp = await client.get("/admin/nodes", headers={"X-API-Key": "test-key"})
             assert resp.status_code == 200
 
     @pytest.mark.asyncio
-    async def test_admin_config_endpoint(self):
+    async def test_admin_config_endpoint(self, monkeypatch):
         from httpx import ASGITransport, AsyncClient
 
         from asc.api.server import create_app
+        monkeypatch.setenv("ASC_API_KEY", "test-key")
         app = create_app()
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.get("/admin/config")
+            resp = await client.get("/admin/config", headers={"X-API-Key": "test-key"})
             assert resp.status_code == 200
 
 

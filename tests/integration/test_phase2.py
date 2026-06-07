@@ -3,6 +3,8 @@
 测试事件溯源 + 选举 + 推理引擎 + Worker Agent + 放置算法的端到端流程。
 """
 
+import pytest
+
 from asc.core.election import BullyElection, ElectionMessage, ElectionMessageType
 from asc.core.event_log import MemoryEventLog
 from asc.network.protocol import Channel, Envelope, Message, MessageType
@@ -140,7 +142,8 @@ class TestDistributedInferenceWorkflow:
 class TestEventLogWithRouter:
     """事件日志 + 消息路由协作。"""
 
-    def test_events_propagated_through_router(self):
+    @pytest.mark.asyncio
+    async def test_events_propagated_through_router(self):
         """事件通过路由器传播到订阅者。"""
         MemoryEventLog()
         router = MessageRouter(node_id="master")
@@ -155,12 +158,13 @@ class TestEventLogWithRouter:
             payload={"ip": "10.0.0.2", "port": 52415},
         )
         env = Envelope(channel=Channel.EVENTS, message=msg)
-        router.handle_incoming(env)
+        await router.handle_incoming(env)
 
         assert len(received) == 1
         assert received[0].message.sender_id == "worker-1"
 
-    def test_own_messages_ignored(self):
+    @pytest.mark.asyncio
+    async def test_own_messages_ignored(self):
         """自己发出的消息不应回环。"""
         router = MessageRouter(node_id="master")
         received = []
@@ -173,7 +177,7 @@ class TestEventLogWithRouter:
             payload={},
         )
         env = Envelope(channel=Channel.EVENTS, message=msg)
-        router.handle_incoming(env)
+        await router.handle_incoming(env)
 
         assert len(received) == 0
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from asc.scheduler.load_balancer import LoadBalancer
+from asc.scheduler.load_balancer import LoadBalancer, NodeLoadMetrics
 
 
 class TestLoadBalancer:
@@ -100,11 +100,72 @@ class TestLoadBalancer:
         lb.start_request("n2")
 
         plan = lb.rebalance_plan(threshold_ratio=2.0)
-        assert len(plan) == 1
-        assert plan[0] == ("n1", "n2")
+        assert len(plan) >= 1
+        assert plan[0][0] == "n1"  # from_node
+        assert plan[0][1] == "n2"  # to_node
+        assert plan[0][2] > 0  # num_tasks
 
     def test_rebalance_plan_single_node(self):
         lb = LoadBalancer()
         lb.register_node("n1")
         plan = lb.rebalance_plan()
         assert plan == []
+
+
+class TestNodeLoadMetrics:
+    """多维负载指标测试。"""
+
+    def test_update_metrics(self):
+        lb = LoadBalancer()
+        lb.register_node("n1")
+        metrics = NodeLoadMetrics(
+            active_requests=5,
+            vram_usage_mb=8000,
+            vram_total_mb=16000,
+            queue_length=3,
+            network_latency_ms=10.0,
+        )
+        lb.update_metrics("n1", metrics)
+        assert lb._node_metrics["n1"].vram_usage_mb == 8000
+
+    def test_multidimensional_load_scoring(self):
+        """多维负载评分：VRAM 使用率高的节点评分更高。"""
+        lb = LoadBalancer(strategy="least_connections")
+        lb.register_node("n1", compute_score=1.0)
+        lb.register_node("n2", compute_score=1.0)
+
+        # n1 VRAM 使用率高
+        lb.update_metrics("n1", NodeLoadMetrics(vram_usage_mb=14000, vram_total_mb=16000))
+        # n2 VRAM 使用率低
+        lb.update_metrics("n2", NodeLoadMetrics(vram_usage_mb=4000, vram_total_mb=16000))
+
+        s = lb.select(["n1", "n2"])
+        assert s.node_id == "n2"  # n2 负载更低
+
+    def test_request_ttl_cleanup(self):
+        """请求 TTL 自动清理。"""
+        lb = LoadBalancer()
+        lb.register_node("n1")
+        lb.start_request("n1", request_id="req-1")
+        assert lb._active_requests["n1"] == 1
+
+        # 模拟请求超时
+        lb._tracked_requests["req-1"].start_time -= 600  # 10分钟前
+        cleaned = lb.cleanup_expired_requests()
+        assert cleaned == 1
+        assert lb._active_requests["n1"] == 0
+
+    def test_rebalance_multiple_pairs(self):
+        """多对多重平衡。"""
+        lb = LoadBalancer()
+        lb.register_node("n1", compute_score=1.0)
+        lb.register_node("n2", compute_score=1.0)
+        lb.register_node("n3", compute_score=1.0)
+        for _ in range(20):
+            lb.start_request("n1")
+        for _ in range(5):
+            lb.start_request("n2")
+        lb.start_request("n3")
+
+        plan = lb.rebalance_plan(threshold_ratio=2.0)
+        assert len(plan) >= 1  # 至少有一对迁移

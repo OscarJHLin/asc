@@ -1,7 +1,11 @@
 """Asc 统一配置管理。
 
-合并原有 Config + ConfigStore 为单一 AscConfig 类。
-支持：默认值、JSON 文件加载/保存、环境变量覆盖、运行时修改、模型映射。
+合并原有 Config + ConfigStore 为单一 AscConfig 类，提供集中式的配置管理。
+支持多种配置来源，按优先级覆盖：
+1. 默认值（代码中硬编码）
+2. JSON 配置文件（用户持久化设置）
+3. 环境变量（运行时覆盖，适合容器化部署）
+4. 运行时修改（程序动态调整）
 
 环境变量映射：
     ASC_NODE_PORT       -> node.port
@@ -9,6 +13,19 @@
     ASC_API_KEY         -> api.key
     ASC_MODELS_PATH     -> paths.models
     ASC_LLAMA_PATH      -> paths.llama_cpp
+
+设计原则：
+- 单一职责：所有配置相关逻辑集中在此模块，避免分散在多个文件中
+- 来源透明：调用者无需关心配置来自默认值、文件还是环境变量
+- 类型安全：环境变量自动尝试 int 转换，减少运行时类型错误
+- 模型映射：支持别名 -> 路径映射，便于用户用简短名称引用模型
+
+使用示例：
+    config = AscConfig()
+    config.load(Path("config.json"))  # 加载文件
+    port = config.get("node", "port")  # 读取（自动包含环境变量覆盖）
+    config.set("node", "port", 52416)  # 运行时修改
+    config.save(Path("config.json"))   # 持久化
 """
 
 from __future__ import annotations

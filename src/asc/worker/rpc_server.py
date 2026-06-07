@@ -9,12 +9,11 @@
 
 from __future__ import annotations
 
-import os
-import shutil
 import socket
 import subprocess
-from pathlib import Path
 from typing import Any
+
+from asc.utils.system import find_executable
 
 
 class RpcServer:
@@ -132,26 +131,8 @@ class RpcServer:
 
     def _find_executable(self) -> str | None:
         """查找 rpc-server 可执行文件。"""
-        project_root = Path(__file__).parent.parent.parent.parent.resolve()
-        candidates = [
-            project_root / "llama.cpp" / "build" / "bin" / "Release" / "rpc-server.exe",
-            project_root / "llama.cpp" / "build" / "bin" / "rpc-server",
-        ]
-
-        custom_path = os.getenv("ASC_LLAMA_PATH")
-        if custom_path:
-            candidates.insert(0, Path(custom_path) / "rpc-server.exe")
-            candidates.insert(1, Path(custom_path) / "rpc-server")
-
-        for path in candidates:
-            if path.exists():
-                return str(path.resolve())
-
-        found = shutil.which("rpc-server")
-        if found:
-            return found
-
-        return None
+        result = find_executable("rpc-server")
+        return str(result) if result is not None else None
 
     def _find_free_port(self) -> int:
         """在默认范围内查找可用端口。"""

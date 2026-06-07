@@ -1,15 +1,37 @@
 """监控与指标收集模块。
 
-提供：
-- 结构化日志记录
-- 性能指标收集（计数器、直方图、仪表盘）
-- 健康检查状态
-- 节点状态聚合
+提供可观测性基础设施，支持性能监控、健康检查和指标导出。
+
+核心组件：
+- Counter：单调递增计数器，适合记录请求总数、错误次数等
+- Histogram：直方图，记录数值分布（如延迟、响应大小），自动分桶
+- Gauge：仪表盘，记录当前值（如在线节点数、活跃请求数）
+- MetricsCollector：统一管理所有指标，支持 Prometheus 格式导出
+- HealthChecker：基于节点状态计算集群健康等级
+
+设计原则：
+- 低开销：指标收集不应显著影响主流程性能
+- 防内存泄漏：Histogram 使用 deque(maxlen=10000)，自动丢弃旧样本
+- 可导出：支持 Prometheus 文本格式，便于接入 Grafana 等监控平台
+
+使用示例：
+    collector = MetricsCollector()
+    collector.counter("requests_total", "总请求数").inc()
+    collector.histogram("request_latency_ms", "请求延迟").observe(45.2)
+    prometheus_text = collector.to_prometheus()
+
+健康检查：
+    HealthChecker 根据在线节点比例判断集群状态：
+    - 0 节点在线 -> unhealthy
+    - 部分节点在线 -> degraded
+    - 全部节点在线 -> healthy
 """
 
 from __future__ import annotations
 
+import asyncio
 import time
+from collections import deque
 from dataclasses import dataclass, field
 
 
@@ -38,7 +60,14 @@ class Histogram:
     name: str
     description: str
     buckets: list[float] = field(default_factory=lambda: [10, 50, 100, 500, 1000, 5000])
-    _values: list[float] = field(default_factory=list, repr=False)
+    max_samples: int = 10000
+    _values: deque[float] = field(default_factory=deque, repr=False)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self._values, deque):
+            self._values = deque(self._values, maxlen=self.max_samples)
+        else:
+            self._values = deque(self._values, maxlen=self.max_samples)
 
     def observe(self, value: float) -> None:
         """记录一个观测值。"""
@@ -156,12 +185,15 @@ class HealthChecker:
     def __init__(self) -> None:
         self._start_time = time.time()
         self._active_requests = 0
+        self._lock = asyncio.Lock()
 
-    def start_request(self) -> None:
-        self._active_requests += 1
+    async def start_request(self) -> None:
+        async with self._lock:
+            self._active_requests += 1
 
-    def finish_request(self) -> None:
-        self._active_requests = max(0, self._active_requests - 1)
+    async def finish_request(self) -> None:
+        async with self._lock:
+            self._active_requests = max(0, self._active_requests - 1)
 
     def check(
         self,

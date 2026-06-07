@@ -3,7 +3,7 @@
 消息协议是节点间通信的基础，替代原有 protocol.py 中未使用的定义。
 设计原则：
 - 每种消息有明确的 channel（类型化通道）
-- JSON 序列化，跨语言兼容
+- 默认 MessagePack 序列化（高性能），兼容 JSON 格式
 - 消息带时间戳和发送者信息
 """
 
@@ -17,6 +17,7 @@ from asc.network.protocol import (
     MessageType,
     decode_envelope,
     encode_envelope,
+    encode_envelope_json,
 )
 
 
@@ -135,13 +136,34 @@ class TestSerialization:
         assert env2.message.payload == env.message.payload
         assert env2.target == env.target
 
-    def test_encode_is_json(self):
+    def test_encode_is_msgpack(self):
+        """默认编码为 MessagePack 格式。"""
         msg = Message(type=MessageType.HEARTBEAT, sender_id="n1", payload={})
         env = Envelope(channel=Channel.HEARTBEATS, message=msg)
         data = encode_envelope(env)
+        # MessagePack 格式不以 { 开头
+        assert data[0:1] != b"{"
+        # 但可以正确解码
+        env2 = decode_envelope(data)
+        assert env2.channel == env.channel
+        assert env2.message.type == env.message.type
+
+    def test_encode_json_compat(self):
+        """JSON 编码格式兼容。"""
+        msg = Message(type=MessageType.HEARTBEAT, sender_id="n1", payload={})
+        env = Envelope(channel=Channel.HEARTBEATS, message=msg)
+        data = encode_envelope_json(env)
         parsed = json.loads(data.decode("utf-8"))
         assert parsed["channel"] == "heartbeats"
         assert parsed["message"]["type"] == "heartbeat"
+
+    def test_decode_json_format(self):
+        """可以解码 JSON 格式的数据。"""
+        msg = Message(type=MessageType.HEARTBEAT, sender_id="n1", payload={})
+        env = Envelope(channel=Channel.HEARTBEATS, message=msg)
+        data = encode_envelope_json(env)
+        env2 = decode_envelope(data)
+        assert env2.channel == env.channel
 
     def test_decode_invalid_data_raises(self):
         try:

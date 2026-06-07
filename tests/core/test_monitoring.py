@@ -192,19 +192,19 @@ class TestHealthChecker:
         status = checker.check(nodes_online=0, nodes_total=3, models_loaded=0)
         assert status.status == "unhealthy"
 
-    def test_active_requests_tracking(self):
+    async def test_active_requests_tracking(self):
         checker = HealthChecker()
-        checker.start_request()
-        checker.start_request()
+        await checker.start_request()
+        await checker.start_request()
         status = checker.check(nodes_online=1, nodes_total=1, models_loaded=1)
         assert status.active_requests == 2
-        checker.finish_request()
+        await checker.finish_request()
         status = checker.check(nodes_online=1, nodes_total=1, models_loaded=1)
         assert status.active_requests == 1
 
-    def test_finish_request_does_not_go_negative(self):
+    async def test_finish_request_does_not_go_negative(self):
         checker = HealthChecker()
-        checker.finish_request()
+        await checker.finish_request()
         status = checker.check(nodes_online=1, nodes_total=1, models_loaded=1)
         assert status.active_requests == 0
 

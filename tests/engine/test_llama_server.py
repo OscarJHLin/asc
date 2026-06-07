@@ -88,7 +88,7 @@ class TestLlamaServerBuilderWaitForReady:
         mock_resp = MagicMock()
         mock_resp.status_code = 200
 
-        with patch("httpx.get", return_value=mock_resp):
+        with patch("httpx.Client.get", return_value=mock_resp):
             builder._wait_for_ready(timeout=1.0)
 
     def test_wait_ready_timeout(self):
@@ -98,7 +98,7 @@ class TestLlamaServerBuilderWaitForReady:
         builder._process.stderr = None
 
         with (
-            patch("httpx.get", side_effect=httpx.ConnectError("refused")),
+            patch("httpx.Client.get", side_effect=httpx.ConnectError("refused")),
             pytest.raises(TimeoutError),
         ):
             builder._wait_for_ready(timeout=0.1)
@@ -110,7 +110,7 @@ class TestLlamaServerBuilderWaitForReady:
         builder._process.stderr.read.return_value = "error msg"
 
         with (
-            patch("httpx.get", side_effect=httpx.ConnectError("refused")),
+            patch("httpx.Client.get", side_effect=httpx.ConnectError("refused")),
             pytest.raises(RuntimeError, match="启动失败"),
         ):
             builder._wait_for_ready(timeout=0.1)
@@ -172,6 +172,7 @@ class TestLlamaServerEngineStatus:
             model_path="/m.gguf",
             base_url="http://127.0.0.1:8081",
             process=self._make_mock_process(),
+            http_client=MagicMock(),
         )
         engine._set_status(EngineStatus.READY)
         assert engine.status() == EngineStatus.READY
@@ -181,6 +182,7 @@ class TestLlamaServerEngineStatus:
             model_path="/m.gguf",
             base_url="http://127.0.0.1:8081",
             process=self._make_mock_process(running=False),
+            http_client=MagicMock(),
         )
         engine._set_status(EngineStatus.READY)
         assert engine.status() == EngineStatus.ERROR
@@ -196,51 +198,54 @@ class TestLlamaServerEngineSubmit:
         return p
 
     def test_submit_success(self):
-        engine = LlamaServerEngine(
-            model_path="/m.gguf",
-            base_url="http://127.0.0.1:8081",
-            process=self._make_mock_process(),
-        )
-        engine._set_status(EngineStatus.READY)
-
+        mock_client = MagicMock()
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {
             "choices": [{"message": {"content": "Hello world"}}]
         }
-
-        with patch("httpx.post", return_value=mock_resp):
-            result = engine.submit(
-                InferenceRequest(prompt="Hi", max_tokens=32, temperature=0.5)
-            )
-            assert result == "Hello world"
-            assert engine.status() == EngineStatus.READY
-
-    def test_submit_http_error(self):
+        mock_client.post.return_value = mock_resp
         engine = LlamaServerEngine(
             model_path="/m.gguf",
             base_url="http://127.0.0.1:8081",
             process=self._make_mock_process(),
+            http_client=mock_client,
         )
         engine._set_status(EngineStatus.READY)
 
+        result = engine.submit(
+            InferenceRequest(prompt="Hi", max_tokens=32, temperature=0.5)
+        )
+        assert result == "Hello world"
+        assert engine.status() == EngineStatus.READY
+
+    def test_submit_http_error(self):
+        mock_client = MagicMock()
         mock_resp = MagicMock()
         mock_resp.raise_for_status.side_effect = httpx.HTTPStatusError(
             "500",
             request=MagicMock(),
             response=MagicMock(),
         )
+        mock_client.post.return_value = mock_resp
+        engine = LlamaServerEngine(
+            model_path="/m.gguf",
+            base_url="http://127.0.0.1:8081",
+            process=self._make_mock_process(),
+            http_client=mock_client,
+        )
+        engine._set_status(EngineStatus.READY)
 
-        with patch("httpx.post", return_value=mock_resp):
-            with pytest.raises(RuntimeError, match="推理请求失败"):
-                engine.submit(InferenceRequest(prompt="Hi"))
-            assert engine.status() == EngineStatus.ERROR
+        with pytest.raises(RuntimeError, match="推理请求失败"):
+            engine.submit(InferenceRequest(prompt="Hi"))
+        assert engine.status() == EngineStatus.ERROR
 
     def test_submit_not_ready_raises(self):
         engine = LlamaServerEngine(
             model_path="/m.gguf",
             base_url="http://127.0.0.1:8081",
             process=self._make_mock_process(),
+            http_client=MagicMock(),
         )
         with pytest.raises(RuntimeError, match="无法提交请求"):
             engine.submit(InferenceRequest(prompt="Hi"))
@@ -257,13 +262,16 @@ class TestLlamaServerEngineClose:
 
     def test_close_terminates_process(self):
         proc = self._make_mock_process()
+        mock_client = MagicMock()
         engine = LlamaServerEngine(
             model_path="/m.gguf",
             base_url="http://127.0.0.1:8081",
             process=proc,
+            http_client=mock_client,
         )
         engine._set_status(EngineStatus.READY)
         engine.close()
+        mock_client.close.assert_called_once()
         proc.terminate.assert_called_once()
         proc.wait.assert_called_once_with(timeout=5)
         assert engine.status() == EngineStatus.SHUTDOWN
@@ -275,6 +283,7 @@ class TestLlamaServerEngineClose:
             model_path="/m.gguf",
             base_url="http://127.0.0.1:8081",
             process=proc,
+            http_client=MagicMock(),
         )
         engine.close()
         proc.kill.assert_called_once()
@@ -286,6 +295,7 @@ class TestLlamaServerEngineClose:
             model_path="/m.gguf",
             base_url="http://127.0.0.1:8081",
             process=proc,
+            http_client=MagicMock(),
         )
         engine.close()
         proc.terminate.assert_not_called()
@@ -301,5 +311,6 @@ class TestLlamaServerEngineStep:
             model_path="/m.gguf",
             base_url="http://127.0.0.1:8081",
             process=proc,
+            http_client=MagicMock(),
         )
         assert engine.step() == []

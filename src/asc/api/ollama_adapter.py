@@ -14,6 +14,8 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 
+from asc.api.prompt_converter import convert_messages_to_prompt
+
 
 @dataclass(frozen=True)
 class OllamaGenerateRequest:
@@ -99,18 +101,7 @@ class OllamaModelInfo:
 
 def _messages_to_prompt(messages: list[dict]) -> str:
     """将 Ollama chat messages 转换为 llama.cpp prompt。"""
-    parts: list[str] = []
-    for msg in messages:
-        role = msg.get("role", "user")
-        content = msg.get("content", "")
-        tag = {
-            "system": "System",
-            "user": "User",
-            "assistant": "Assistant",
-        }.get(role, "User")
-        parts.append(f"[{tag}]: {content}")
-    parts.append("[Assistant]:")
-    return "\n".join(parts)
+    return convert_messages_to_prompt(messages)
 
 
 class OllamaAdapter:

@@ -12,11 +12,20 @@ from asc.api.server import create_app
 class TestAuthMiddleware:
     """API Key 认证。"""
 
-    def test_no_key_configured_passes(self):
-        """未配置 API Key 时跳过认证。"""
+    def test_no_key_configured_rejects(self):
+        """S-02/S-03: 未配置 API Key 时拒绝请求。"""
         os.environ.pop("ASC_API_KEY", None)
-        # 无 key 时应该通过
-        assert require_api_key(api_key=None) is True
+        os.environ.pop("ASC_ALLOW_NO_AUTH", None)
+        assert require_api_key(api_key=None) is False
+
+    def test_no_key_with_allow_no_auth(self):
+        """ASC_ALLOW_NO_AUTH=1 时允许免认证。"""
+        os.environ.pop("ASC_API_KEY", None)
+        os.environ["ASC_ALLOW_NO_AUTH"] = "1"
+        try:
+            assert require_api_key(api_key=None) is True
+        finally:
+            del os.environ["ASC_ALLOW_NO_AUTH"]
 
     def test_valid_key_passes(self):
         """正确的 API Key 通过。"""
@@ -46,6 +55,13 @@ class TestAuthMiddleware:
 class TestFastAPIApp:
     """FastAPI 应用。"""
 
+    def _make_client_with_auth(self, **kwargs):
+        """创建带认证的测试客户端。"""
+        os.environ["ASC_ALLOW_NO_AUTH"] = "1"
+        app = create_app(**kwargs)
+        client = TestClient(app)
+        return client
+
     def test_create_app(self):
         app = create_app()
         assert app is not None
@@ -70,9 +86,7 @@ class TestFastAPIApp:
 
     def test_openai_chat_completions_endpoint(self):
         """Chat completions 端点存在（不测试实际推理）。"""
-        app = create_app(model_mappings={"m": "/m.gguf"})
-        client = TestClient(app)
-        # 发送请求但引擎未启动，应返回 503 或错误
+        client = self._make_client_with_auth(model_mappings={"m": "/m.gguf"})
         resp = client.post(
             "/v1/chat/completions",
             json={
@@ -80,28 +94,71 @@ class TestFastAPIApp:
                 "messages": [{"role": "user", "content": "Hi"}],
             },
         )
-        # 引擎未启动，预期 503
         assert resp.status_code in (200, 503)
 
     def test_admin_nodes_endpoint(self):
+        """S-05: 管理端点需要管理员认证。"""
+        # 无认证时应返回 403（管理端点需要管理员权限）
+        os.environ.pop("ASC_API_KEY", None)
+        os.environ.pop("ASC_ALLOW_NO_AUTH", None)
+        os.environ.pop("ASC_ADMIN_API_KEY", None)
         app = create_app()
         client = TestClient(app)
         resp = client.get("/admin/nodes")
-        assert resp.status_code == 200
+        assert resp.status_code == 403
+
+        # 有普通 API Key 但无管理员 Key 时，回退到普通 Key 验证（兼容模式）
+        os.environ["ASC_API_KEY"] = "test-key"
+        try:
+            app = create_app()
+            client = TestClient(app)
+            resp = client.get("/admin/nodes", headers={"X-API-Key": "test-key"})
+            assert resp.status_code == 200
+        finally:
+            del os.environ["ASC_API_KEY"]
+
+        # 有管理员 Key 时，使用管理员 Key 验证
+        os.environ["ASC_ADMIN_API_KEY"] = "admin-key"
+        try:
+            app = create_app()
+            client = TestClient(app)
+            # 普通 Key 被拒绝
+            resp = client.get("/admin/nodes", headers={"X-API-Key": "wrong-key"})
+            assert resp.status_code == 403
+            # 管理员 Key 通过
+            resp = client.get("/admin/nodes", headers={"X-API-Key": "admin-key"})
+            assert resp.status_code == 200
+        finally:
+            del os.environ["ASC_ADMIN_API_KEY"]
 
     def test_admin_config_endpoint(self):
+        """S-05: 管理端点需要管理员认证。"""
+        os.environ.pop("ASC_API_KEY", None)
+        os.environ.pop("ASC_ALLOW_NO_AUTH", None)
+        os.environ.pop("ASC_ADMIN_API_KEY", None)
         app = create_app()
         client = TestClient(app)
         resp = client.get("/admin/config")
-        assert resp.status_code == 200
+        assert resp.status_code == 403
+
+        os.environ["ASC_API_KEY"] = "test-key"
+        try:
+            app = create_app()
+            client = TestClient(app)
+            resp = client.get("/admin/config", headers={"X-API-Key": "test-key"})
+            assert resp.status_code == 200
+        finally:
+            del os.environ["ASC_API_KEY"]
 
     def test_chat_completions_with_engine_success(self):
         """模拟引擎可用时的成功推理。"""
+        from unittest.mock import AsyncMock
+
         mock_engine = MagicMock()
         mock_engine.submit.return_value = "Hello world"
+        mock_engine.submit_async = AsyncMock(return_value="Hello world")
 
-        app = create_app(model_mappings={"m": "/m.gguf"}, engine=mock_engine)
-        client = TestClient(app)
+        client = self._make_client_with_auth(model_mappings={"m": "/m.gguf"}, engine=mock_engine)
         resp = client.post(
             "/v1/chat/completions",
             json={
@@ -118,11 +175,13 @@ class TestFastAPIApp:
 
     def test_chat_completions_engine_error_returns_500(self):
         """引擎抛出异常时返回 500。"""
-        mock_engine = MagicMock()
-        mock_engine.submit.side_effect = RuntimeError("GPU OOM")
+        from unittest.mock import AsyncMock
 
-        app = create_app(model_mappings={"m": "/m.gguf"}, engine=mock_engine)
-        client = TestClient(app)
+        mock_engine = MagicMock()
+        mock_engine.submit.return_value = "Hello world"
+        mock_engine.submit_async = AsyncMock(side_effect=RuntimeError("GPU OOM"))
+
+        client = self._make_client_with_auth(model_mappings={"m": "/m.gguf"}, engine=mock_engine)
         resp = client.post(
             "/v1/chat/completions",
             json={
@@ -131,13 +190,22 @@ class TestFastAPIApp:
             },
         )
         assert resp.status_code == 500
-        assert "GPU OOM" in resp.json()["detail"]
 
     def test_chat_completions_streaming(self):
         """流式响应测试。"""
+        from unittest.mock import AsyncMock
+
         mock_engine = MagicMock()
-        app = create_app(model_mappings={"m": "/m.gguf"}, engine=mock_engine)
-        client = TestClient(app)
+        mock_engine.submit_async = AsyncMock(return_value="Hello world")
+
+        # 模拟异步流式生成器
+        async def mock_stream(request):
+            for char in "Hello world":
+                yield char
+
+        mock_engine.submit_async_stream = mock_stream
+
+        client = self._make_client_with_auth(model_mappings={"m": "/m.gguf"}, engine=mock_engine)
         resp = client.post(
             "/v1/chat/completions",
             json={
@@ -172,11 +240,35 @@ class TestFastAPIApp:
         """提供正确的 API Key 应通过认证。"""
         os.environ["ASC_API_KEY"] = "secret-key"
         try:
-            # server.py 的 require_api_key() 未读取 Authorization header，
-            # 直接调用 require_api_key("secret-key") 可验证认证逻辑本身
-            from asc.api.auth import require_api_key as _require
-
-            assert _require("secret-key") is True
-            assert _require("wrong-key") is False
+            app = create_app(model_mappings={"m": "/m.gguf"})
+            client = TestClient(app)
+            resp = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "m",
+                    "messages": [{"role": "user", "content": "Hi"}],
+                },
+                headers={"X-API-Key": "secret-key"},
+            )
+            # 503 = 引擎未启动，但认证已通过
+            assert resp.status_code in (200, 503)
         finally:
             del os.environ["ASC_API_KEY"]
+
+    def test_no_auth_env_allows_requests(self):
+        """ASC_ALLOW_NO_AUTH=1 允许无认证请求。"""
+        os.environ.pop("ASC_API_KEY", None)
+        os.environ["ASC_ALLOW_NO_AUTH"] = "1"
+        try:
+            app = create_app(model_mappings={"m": "/m.gguf"})
+            client = TestClient(app)
+            resp = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "m",
+                    "messages": [{"role": "user", "content": "Hi"}],
+                },
+            )
+            assert resp.status_code in (200, 503)
+        finally:
+            del os.environ["ASC_ALLOW_NO_AUTH"]

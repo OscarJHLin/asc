@@ -11,7 +11,6 @@ from unittest.mock import MagicMock, patch
 
 from asc.worker.agent import (
     NodeResources,
-    RPCServerManager,
     WorkerAgent,
 )
 from asc.worker.benchmark_score import BenchmarkReport, BenchmarkScore
@@ -122,57 +121,6 @@ class TestNodeResources:
             gpus=[],
         )
         assert res.total_vram_free_mb == 0
-
-
-class TestRPCServerManager:
-    """RPC Server 生命周期管理。"""
-
-    def test_initial_state(self):
-        mgr = RPCServerManager()
-        assert not mgr.is_running
-        assert mgr.port is None
-
-    @patch.object(RPCServerManager, "_find_executable", return_value="/usr/bin/rpc-server")
-    @patch("subprocess.Popen")
-    def test_start(self, mock_popen, mock_find):
-        mock_process = MagicMock()
-        mock_process.poll.return_value = None
-        mock_popen.return_value = mock_process
-
-        mgr = RPCServerManager()
-        mgr.start(host="0.0.0.0", port=50052)
-        assert mgr.is_running
-        assert mgr.port == 50052
-
-    @patch.object(RPCServerManager, "_find_executable", return_value="/usr/bin/rpc-server")
-    @patch("subprocess.Popen")
-    def test_stop(self, mock_popen, mock_find):
-        mock_process = MagicMock()
-        mock_process.poll.return_value = None
-        mock_popen.return_value = mock_process
-
-        mgr = RPCServerManager()
-        mgr.start(host="0.0.0.0", port=50052)
-        mgr.stop()
-        assert not mgr.is_running
-        mock_process.terminate.assert_called_once()
-
-    def test_stop_when_not_running(self):
-        mgr = RPCServerManager()
-        mgr.stop()  # 不应抛异常
-
-    @patch.object(RPCServerManager, "_find_executable", return_value="/usr/bin/rpc-server")
-    @patch("subprocess.Popen")
-    def test_status(self, mock_popen, mock_find):
-        mock_process = MagicMock()
-        mock_process.poll.return_value = None
-        mock_popen.return_value = mock_process
-
-        mgr = RPCServerManager()
-        mgr.start(host="0.0.0.0", port=50052)
-        status = mgr.status()
-        assert status["running"] is True
-        assert status["port"] == 50052
 
 
 class TestWorkerAgent:

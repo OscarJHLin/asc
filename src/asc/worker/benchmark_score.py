@@ -21,6 +21,9 @@ from typing import Any
 import httpx
 import psutil
 
+from asc.utils.system import find_executable
+from asc.worker.hardware import HardwareDetector
+
 
 @dataclass
 class BenchmarkQuestion:
@@ -163,6 +166,7 @@ class BenchmarkScore:
 
         self._process: subprocess.Popen | None = None
         self._questions: list[BenchmarkQuestion] = []
+        self._hardware_detector = HardwareDetector()
 
     # ------------------------------------------------------------------
     # 公共 API
@@ -184,6 +188,9 @@ class BenchmarkScore:
             for q in self._questions:
                 result = self._run_single_question(q)
                 results.append(result)
+
+            if not results:
+                raise RuntimeError("基准测试未产生任何结果，请检查问题集和模型配置")
 
             avg_elapsed = sum(r.elapsed_ms for r in results) / len(results)
             avg_tps = sum(r.tps for r in results) / len(results)
@@ -426,7 +433,7 @@ class BenchmarkScore:
     def _get_hardware_summary(self) -> dict[str, Any]:
         """获取节点硬件信息摘要。"""
         mem = psutil.virtual_memory()
-        gpus = self._detect_gpus()
+        gpus = self._hardware_detector.detect_gpus()
         return {
             "cpu_count": psutil.cpu_count(logical=True) or 0,
             "memory_total_mb": int(mem.total // (1024 * 1024)),
@@ -434,44 +441,14 @@ class BenchmarkScore:
             "gpu_count": len(gpus),
             "gpus": [
                 {
-                    "index": g["index"],
-                    "name": g["name"],
-                    "vram_total_mb": g["vram_total_mb"],
-                    "vram_free_mb": g["vram_free_mb"],
+                    "index": g.index,
+                    "name": g.name,
+                    "vram_total_mb": g.vram_total_mb,
+                    "vram_free_mb": g.vram_free_mb,
                 }
                 for g in gpus
             ],
         }
-
-    def _detect_gpus(self) -> list[dict[str, Any]]:
-        """简易 GPU 检测（复用 agent.py 逻辑）。"""
-        gpus = []
-        try:
-            result = subprocess.run(
-                [
-                    "nvidia-smi",
-                    "--query-gpu=index,name,memory.total,memory.free",
-                    "--format=csv,noheader,nounits",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if result.returncode == 0:
-                for line in result.stdout.strip().split("\n"):
-                    parts = [p.strip() for p in line.split(",")]
-                    if len(parts) >= 4:
-                        gpus.append(
-                            {
-                                "index": int(parts[0]),
-                                "name": parts[1],
-                                "vram_total_mb": int(float(parts[2])),
-                                "vram_free_mb": int(float(parts[3])),
-                            }
-                        )
-        except Exception:
-            pass
-        return gpus
 
     # ------------------------------------------------------------------
     # 路径/可执行文件查找
@@ -479,24 +456,8 @@ class BenchmarkScore:
 
     def _find_llama_server(self) -> str | None:
         """查找 llama-server 可执行文件。"""
-        project_root = Path(__file__).parent.parent.parent.parent.resolve()
-        candidates = [
-            project_root / "llama.cpp" / "build" / "bin" / "Release" / "llama-server.exe",
-            project_root / "llama.cpp" / "build" / "bin" / "llama-server",
-            project_root / "llama.cpp" / "build-linux" / "bin" / "llama-server",
-        ]
-        custom_path = os.getenv("ASC_LLAMA_PATH")
-        if custom_path:
-            candidates.insert(0, Path(custom_path) / "llama-server.exe")
-            candidates.insert(1, Path(custom_path) / "llama-server")
-        for path in candidates:
-            if path.exists():
-                return str(path.resolve())
-        import shutil
-        found = shutil.which("llama-server")
-        if found:
-            return found
-        return None
+        result = find_executable("llama-server")
+        return str(result) if result is not None else None
 
     def _find_default_model(self) -> str:
         """查找默认基准模型路径。"""

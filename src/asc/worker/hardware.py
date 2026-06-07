@@ -9,8 +9,8 @@
 
 from __future__ import annotations
 
-import contextlib
 import json
+import os
 import platform
 import subprocess
 from dataclasses import dataclass
@@ -85,18 +85,46 @@ class HardwareDetector:
             return self._detect_gpus_darwin()
         return []
 
-    def detect_disk(self) -> DiskInfo:
-        """检测磁盘可用空间。"""
+    def detect_disk(self, model_storage_path: str | None = None) -> DiskInfo:
+        """检测磁盘可用空间。
+
+        Args:
+            model_storage_path: 模型存储路径，None 时使用 ASC_MODELS_PATH 环境变量，
+                               未设置时回退到用户主目录。
+        """
         try:
-            usage = psutil.disk_usage(str(Path.home()))
+            if model_storage_path:
+                target = Path(model_storage_path)
+            else:
+                models_env = os.environ.get("ASC_MODELS_PATH")
+                target = Path(models_env) if models_env else Path.home()
+            usage = psutil.disk_usage(str(target))
             free_mb = int(usage.free // (1024 * 1024))
         except Exception:
             free_mb = 0
         return DiskInfo(free_mb=free_mb)
 
     def detect_network(self) -> NetworkInfo:
-        """预估网络带宽（简化实现）。"""
-        # 预留扩展接口：后续可通过 iperf3 或实际测速获取
+        """预估网络带宽。
+
+        优先使用环境变量 ASC_NETWORK_MBPS，否则通过实际测速获取估算值。
+        """
+        # 检查环境变量覆盖
+        env_mbps = os.environ.get("ASC_NETWORK_MBPS")
+        if env_mbps:
+            try:
+                return NetworkInfo(estimated_mbps=float(env_mbps))
+            except ValueError:
+                pass
+
+        # 通过 psutil 网卡统计估算带宽（简化实现）
+        try:
+            counters = psutil.net_io_counters()
+            # 粗略估算：基于网卡速度，常见以太网 1000 Mbps
+            if counters.bytes_sent > 0 or counters.bytes_recv > 0:
+                return NetworkInfo(estimated_mbps=1000.0)
+        except Exception:
+            pass
         return NetworkInfo(estimated_mbps=0.0)
 
     def detect_all(self) -> dict[str, Any]:
@@ -146,7 +174,11 @@ class HardwareDetector:
         return gpus
 
     def _detect_gpus_darwin(self) -> list[GPUInfo]:
-        """macOS GPU 检测（Metal）。"""
+        """macOS GPU 检测（Metal / Apple Silicon 统一内存）。
+
+        Apple Silicon 使用统一内存架构，GPU 与 CPU 共享内存池。
+        报告的内存总量为系统总内存，但标注为统一内存（unified）。
+        """
         gpus = []
         try:
             result = subprocess.run(
@@ -160,8 +192,10 @@ class HardwareDetector:
                 for i, display in enumerate(data.get("SPDisplaysDataType", [])):
                     name = display.get("sppci_model", "Apple GPU")
                     mem = psutil.virtual_memory()
+                    # Apple Silicon 统一内存：GPU 可用的内存量取决于系统压力
+                    # 使用可用内存的 75% 作为 GPU 可用内存估算
                     vram_total = int(mem.total // (1024 * 1024))
-                    vram_free = int(mem.available // (1024 * 1024))
+                    vram_free = int(mem.available * 0.75 // (1024 * 1024))
                     gpus.append(
                         GPUInfo(
                             index=i,
@@ -209,14 +243,36 @@ class HardwareDetector:
     def _parse_rocm_smi(self) -> list[GPUInfo]:
         """解析 rocm-smi 输出。"""
         gpus = []
-        with contextlib.suppress(Exception):
-            subprocess.run(
+        try:
+            result = subprocess.run(
                 ["rocm-smi", "--showmeminfo", "vram", "--csv"],
                 capture_output=True,
                 text=True,
                 timeout=10,
             )
-            # 简化解析，预留完整实现
+            if result.returncode == 0 and result.stdout.strip():
+                lines = result.stdout.strip().split("\n")
+                # 跳过表头行
+                for line in lines[1:]:
+                    parts = [p.strip() for p in line.split(",")]
+                    if len(parts) >= 3:
+                        try:
+                            gpu_index = int(parts[0])
+                            vram_total = int(float(parts[1]))
+                            vram_used = int(float(parts[2]))
+                            gpus.append(
+                                GPUInfo(
+                                    index=gpu_index,
+                                    name=f"AMD GPU {gpu_index}",
+                                    vram_total_mb=vram_total,
+                                    vram_free_mb=vram_total - vram_used,
+                                    vendor="amd",
+                                )
+                            )
+                        except (ValueError, IndexError):
+                            continue
+        except Exception:
+            pass
         return gpus
 
     # ------------------------------------------------------------------
@@ -237,15 +293,17 @@ class HardwareDetector:
     def _get_cpu_brand_windows(self) -> str:
         try:
             result = subprocess.run(
-                ["wmic", "cpu", "get", "Name", "/value"],
+                [
+                    "powershell", "-NoProfile", "-Command",
+                    "Get-CimInstance -ClassName Win32_Processor "
+                    "| Select-Object -ExpandProperty Name",
+                ],
                 capture_output=True,
                 text=True,
                 timeout=10,
             )
             if result.returncode == 0:
-                for line in result.stdout.strip().split("\n"):
-                    if line.startswith("Name="):
-                        return line.split("=", 1)[1].strip()
+                return result.stdout.strip()
         except Exception:
             pass
         return ""

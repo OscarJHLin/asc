@@ -4,12 +4,14 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
+from asc.core.model_downloader import DownloadSource
 from asc.core.model_manager import (
     DownloadProgress,
     ModelManager,
     ModelMetadata,
 )
-from asc.core.model_downloader import DownloadSource
 
 
 class TestModelMetadata:
@@ -184,7 +186,8 @@ class TestModelManager:
             assert result.success
             assert mgr.resolve("test-model") is not None
 
-    def test_distribute_model(self):
+    @pytest.mark.asyncio
+    async def test_distribute_model(self):
         """分发模型到节点。"""
         with tempfile.TemporaryDirectory() as tmpdir:
             models_dir = Path(tmpdir)
@@ -196,11 +199,6 @@ class TestModelManager:
             targets = [
                 DistributionTarget(node_id="w1", ip="10.0.0.1", port=52415),
             ]
-            gen = mgr.distribute_model("test-model", targets, send_chunk_fn=None)
-            try:
-                while True:
-                    next(gen)
-            except StopIteration as e:
-                results = e.value
+            results = await mgr.distribute_model("test-model", targets, send_chunk_fn=None)
 
             assert len(results) == 1

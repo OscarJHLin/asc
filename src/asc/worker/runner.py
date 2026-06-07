@@ -74,6 +74,7 @@ class Runner:
     """Worker Runner 状态机。"""
 
     node_id: str
+    max_history: int = 1000
     _state: RunnerState = field(default=RunnerState.IDLE, init=False)
     _last_error: str | None = field(default=None, init=False)
     _state_history: list[tuple[RunnerState, RunnerState]] = field(default_factory=list, init=False)
@@ -109,6 +110,8 @@ class Runner:
         old_state = self._state
         self._state = target
         self._state_history.append((old_state, target))
+        if len(self._state_history) > self.max_history:
+            self._state_history = self._state_history[-self.max_history :]
 
         if command == RunnerCommand.ERROR:
             self._last_error = error_msg

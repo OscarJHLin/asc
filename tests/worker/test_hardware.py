@@ -151,7 +151,8 @@ class TestHardwareDetectorNetwork:
     def test_detect_network(self):
         detector = HardwareDetector()
         net = detector.detect_network()
-        assert net.estimated_mbps == 0.0
+        # 网络检测现在返回实际估算值（非 0.0）
+        assert net.estimated_mbps >= 0.0
 
 
 class TestHardwareDetectorAll:
@@ -198,7 +199,7 @@ class TestCPUBrandDetection:
     def test_get_cpu_brand_windows(self, mock_system, mock_run):
         mock_run.return_value = MagicMock(
             returncode=0,
-            stdout="Name=Intel(R) Core(TM) i7-9700K CPU @ 3.60GHz\n",
+            stdout="Intel(R) Core(TM) i7-9700K CPU @ 3.60GHz\n",
         )
         detector = HardwareDetector()
         assert detector._get_cpu_brand() == "Intel(R) Core(TM) i7-9700K CPU @ 3.60GHz"

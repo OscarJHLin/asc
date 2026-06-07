@@ -495,6 +495,7 @@ class TestDiskEventLog:
         )
         log1 = DiskEventLog(path)
         log1.append(ie)
+        log1.flush()  # 确保缓冲区写入磁盘
 
         log2 = DiskEventLog(path)
         assert len(log2) == 1
@@ -605,6 +606,7 @@ class TestEventLogBoundary:
         )
         log = DiskEventLog(path)
         log.append(ie)
+        log.flush()  # 确保缓冲区写入磁盘
         # 手动添加空行
         with open(path, "a", encoding="utf-8") as f:
             f.write("\n\n")

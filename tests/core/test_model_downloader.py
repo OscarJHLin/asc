@@ -221,8 +221,8 @@ class TestModelDownloader:
                 try:
                     while True:
                         next(gen)
-                except StopIteration as e:
-                    result = e.value
+                except StopIteration:
+                    pass
 
                 mock_install.assert_called_once()
 
@@ -253,7 +253,10 @@ class TestParseModelscopeUri:
     """ModelScope URI 解析。"""
 
     def test_direct_model_id(self):
-        assert ModelDownloader._parse_modelscope_uri("unsloth/Qwen3.6-27B-GGUF") == "unsloth/Qwen3.6-27B-GGUF"
+        assert (
+            ModelDownloader._parse_modelscope_uri("unsloth/Qwen3.6-27B-GGUF")
+            == "unsloth/Qwen3.6-27B-GGUF"
+        )
 
     def test_community_link(self):
         uri = "https://modelscope.cn/models/unsloth/Qwen3.6-27B-GGUF"

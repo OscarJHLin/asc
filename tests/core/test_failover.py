@@ -6,6 +6,7 @@
 - GracefulShutdown：请求控制、关闭流程、等待完成
 """
 
+import asyncio
 import time
 
 from asc.core.failover import (
@@ -262,73 +263,69 @@ class TestFailoverManagerIsFailed:
 class TestGracefulShutdownRequestLifecycle:
     """请求生命周期控制。"""
 
-    def test_start_request_allowed_normally(self):
+    async def test_start_request_allowed_normally(self):
         gs = GracefulShutdown()
-        assert gs.start_request() is True
+        assert await gs.start_request() is True
         assert gs._active_requests == 1
 
-    def test_start_request_rejected_after_shutdown(self):
+    async def test_start_request_rejected_after_shutdown(self):
         gs = GracefulShutdown()
         gs.start_shutdown()
-        assert gs.start_request() is False
+        assert await gs.start_request() is False
 
-    def test_finish_request_decrements_count(self):
+    async def test_finish_request_decrements_count(self):
         gs = GracefulShutdown()
-        gs.start_request()
-        gs.start_request()
-        gs.finish_request()
+        await gs.start_request()
+        await gs.start_request()
+        await gs.finish_request()
         assert gs._active_requests == 1
-        gs.finish_request()
+        await gs.finish_request()
         assert gs._active_requests == 0
 
-    def test_finish_request_does_not_go_negative(self):
+    async def test_finish_request_does_not_go_negative(self):
         gs = GracefulShutdown()
-        gs.finish_request()
+        await gs.finish_request()
         assert gs._active_requests == 0
 
 
 class TestGracefulShutdownWaitForCompletion:
     """等待所有请求完成。"""
 
-    def test_wait_returns_true_when_no_requests(self):
+    async def test_wait_returns_true_when_no_requests(self):
         gs = GracefulShutdown()
-        assert gs.wait_for_completion() is True
+        assert await gs.wait_for_completion() is True
 
-    def test_wait_returns_true_after_requests_finish(self):
+    async def test_wait_returns_true_after_requests_finish(self):
         gs = GracefulShutdown(timeout_sec=1.0)
-        gs.start_request()
-        gs.start_request()
+        await gs.start_request()
+        await gs.start_request()
 
-        def finish_later():
-            time.sleep(0.05)
-            gs.finish_request()
-            gs.finish_request()
+        async def finish_later():
+            await asyncio.sleep(0.05)
+            await gs.finish_request()
+            await gs.finish_request()
 
-        import threading
+        asyncio.create_task(finish_later())
+        assert await gs.wait_for_completion() is True
 
-        t = threading.Thread(target=finish_later)
-        t.start()
-        assert gs.wait_for_completion() is True
-        t.join()
-
-    def test_wait_returns_false_on_timeout(self):
+    async def test_wait_returns_false_on_timeout(self):
         gs = GracefulShutdown(timeout_sec=0.01)
-        gs.start_request()
-        assert gs.wait_for_completion() is False
-        gs.finish_request()
+        await gs.start_request()
+        assert await gs.wait_for_completion() is False
+        await gs.finish_request()
 
 
 class TestGracefulShutdownShutdown:
     """完整关闭流程。"""
 
-    def test_shutdown_invokes_callback(self):
+    async def test_shutdown_invokes_callback(self):
         called = []
         gs = GracefulShutdown(on_shutdown=lambda: called.append(1))
-        gs.shutdown()
+        await gs.shutdown()
         assert called == [1]
         assert gs.is_shutting_down
 
-    def test_shutdown_without_callback(self):
+    async def test_shutdown_without_callback(self):
         gs = GracefulShutdown()
-        gs.shutdown()
+        await gs.shutdown()
         assert gs.is_shutting_down

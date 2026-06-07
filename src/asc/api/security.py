@@ -1,14 +1,26 @@
 """API 安全模块。
 
-提供：
-- 基于内存的 API 限流（滑动窗口）
-- 输入长度限制
-- 参数范围校验
-- 内容安全过滤（可选）
+提供 API 层的防护机制，防止滥用和恶意输入：
+- 基于内存的滑动窗口限流（RateLimiter）
+- 输入长度和参数范围校验（InputValidator）
+- 基础内容安全过滤（ContentFilter，生产环境建议接入专业服务）
+
+安全策略：
+    1. 限流：按客户端 IP 或 API Key 限制请求频率，防止暴力破解和 DDoS
+    2. 校验：限制 prompt 长度、max_tokens、temperature 等参数范围
+    3. 过滤：基于关键词列表进行基础内容审核（可配置）
+
+线程安全：
+    RateLimiter 使用 asyncio.Lock 保护内存中的计数器，可在多协程环境下安全使用。
+    InputValidator 和 ContentFilter 为纯函数/无状态，无需锁。
+
+性能注意：
+    限流数据存储在内存中，单进程有效。若部署多进程，需改用 Redis 等外部存储。
 """
 
 from __future__ import annotations
 
+import asyncio
 import time
 from dataclasses import dataclass, field
 
@@ -24,7 +36,17 @@ class RateLimitEntry:
 class RateLimiter:
     """基于内存的滑动窗口限流器。
 
-    按 key（如 IP 地址或 API Key）统计请求频率。
+    按 key（如 IP 地址或 API Key）统计请求频率，防止单客户端过度消耗资源。
+    采用滑动窗口而非固定窗口，避免窗口边界处的突发流量问题。
+
+    算法说明：
+        - 每个 key 维护一个计数器和窗口起始时间
+        - 若当前时间 - window_start > window_seconds，重置计数器（新窗口）
+        - 若计数器 < max_requests，允许通过并递增计数器
+        - 否则拒绝
+
+    扩展建议：
+        生产环境若需多进程共享限流状态，可替换为 Redis + Lua 脚本实现。
     """
 
     def __init__(
@@ -35,44 +57,65 @@ class RateLimiter:
         self._max_requests = max_requests
         self._window_seconds = window_seconds
         self._entries: dict[str, RateLimitEntry] = {}
+        self._lock = asyncio.Lock()
 
-    def is_allowed(self, key: str) -> bool:
-        """检查 key 是否允许通过。"""
-        now = time.time()
-        entry = self._entries.get(key)
+    async def is_allowed(self, key: str) -> bool:
+        """检查 key 是否允许通过当前请求。
 
-        if entry is None or now - entry.window_start > self._window_seconds:
-            # 新窗口
-            self._entries[key] = RateLimitEntry(count=1, window_start=now)
-            return True
+        Args:
+            key: 限流键，通常为客户端 IP 或 API Key
 
-        if entry.count < self._max_requests:
-            entry.count += 1
-            return True
+        Returns:
+            True 允许通过，False 拒绝（触发 429 Too Many Requests）
+        """
+        async with self._lock:
+            now = time.time()
+            entry = self._entries.get(key)
 
-        return False
+            if entry is None or now - entry.window_start > self._window_seconds:
+                # 新窗口：重置计数器
+                self._entries[key] = RateLimitEntry(count=1, window_start=now)
+                return True
 
-    def remaining(self, key: str) -> int:
-        """返回 key 在当前窗口剩余的请求次数。"""
-        now = time.time()
-        entry = self._entries.get(key)
-        if entry is None or now - entry.window_start > self._window_seconds:
-            return self._max_requests
-        return max(0, self._max_requests - entry.count)
+            if entry.count < self._max_requests:
+                entry.count += 1
+                return True
 
-    def reset(self, key: str) -> None:
-        """重置 key 的限流计数。"""
-        self._entries.pop(key, None)
+            return False
 
-    def cleanup(self) -> None:
-        """清理过期的限流条目。"""
-        now = time.time()
-        expired = [
-            k for k, v in self._entries.items()
-            if now - v.window_start > self._window_seconds
-        ]
-        for k in expired:
-            self._entries.pop(k, None)
+    async def remaining(self, key: str) -> int:
+        """返回 key 在当前窗口剩余的请求次数。
+
+        用于在响应头中设置 X-RateLimit-Remaining，帮助客户端调整请求频率。
+        """
+        async with self._lock:
+            now = time.time()
+            entry = self._entries.get(key)
+            if entry is None or now - entry.window_start > self._window_seconds:
+                return self._max_requests
+            return max(0, self._max_requests - entry.count)
+
+    async def reset(self, key: str) -> None:
+        """重置 key 的限流计数。
+
+        可用于手动解禁被限流的客户端（如管理员操作）。
+        """
+        async with self._lock:
+            self._entries.pop(key, None)
+
+    async def cleanup(self) -> None:
+        """清理过期的限流条目，释放内存。
+
+        建议定期调用（如每小时一次），防止内存无限增长。
+        """
+        async with self._lock:
+            now = time.time()
+            expired = [
+                k for k, v in self._entries.items()
+                if now - v.window_start > self._window_seconds
+            ]
+            for k in expired:
+                self._entries.pop(k, None)
 
 
 class InputValidator:

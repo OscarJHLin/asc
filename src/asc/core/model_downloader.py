@@ -11,7 +11,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import enum
+import logging
 import os
 import shutil
 import subprocess
@@ -26,6 +28,9 @@ class DownloadSource(enum.Enum):
     HUGGINGFACE = "huggingface"
     MODELSCOPE = "modelscope"
     MANUAL = "manual"
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -248,11 +253,16 @@ class ModelDownloader:
                 text=True,
                 bufsize=1,
             )
-            if process.stdout is not None:
-                for line in process.stdout:
-                    line = line.strip()
-                    if line:
-                        yield {"stage": "downloading", "progress": 0.5, "detail": line}
+            try:
+                if process.stdout is not None:
+                    for line in process.stdout:
+                        line = line.strip()
+                        if line:
+                            yield {"stage": "downloading", "progress": 0.5, "detail": line}
+            finally:
+                if process.stdout is not None:
+                    with contextlib.suppress(Exception):
+                        process.stdout.close()
 
             returncode = process.wait()
             if returncode != 0:
@@ -394,6 +404,9 @@ class ModelDownloader:
                 timeout=300,
             )
             return result.returncode == 0
+        except subprocess.TimeoutExpired:
+            logger.warning("pip install modelscope 超时，子进程可能未完全清理")
+            return False
         except Exception:
             return False
 

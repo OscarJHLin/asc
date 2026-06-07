@@ -2,6 +2,8 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from asc.master.orchestrator import DistributedOrchestrator, OrchestratorResult
 from asc.scheduler.placement import PlacementEngine, PlacementResult, PlacementStrategy
 from asc.scheduler.splitter import TensorSplitResult
@@ -73,9 +75,10 @@ class TestOrchestratorResult:
 class TestCreateInstanceLocal:
     """单节点本地推理场景。"""
 
+    @pytest.mark.asyncio
     @patch.object(PlacementEngine, "place")
     @patch.object(DistributedOrchestrator, "_start_llama_server")
-    def test_single_node_local(self, mock_start, mock_place):
+    async def test_single_node_local(self, mock_start, mock_place):
         mock_place.return_value = PlacementResult(
             success=True,
             selected_nodes=["master"],
@@ -89,7 +92,7 @@ class TestCreateInstanceLocal:
         }
         resources = {NodeId("master"): _make_resources(10000)}
 
-        result = orch.create_instance(
+        result = await orch.create_instance(
             instance_id=InstanceId("i1"),
             model_id="llama-3.1-8b",
             model_path="/models/llama.gguf",
@@ -108,10 +111,11 @@ class TestCreateInstanceLocal:
 class TestCreateInstanceDistributed:
     """多节点分布式推理场景。"""
 
+    @pytest.mark.asyncio
     @patch.object(PlacementEngine, "place")
     @patch.object(DistributedOrchestrator, "_start_llama_server")
     @patch.object(DistributedOrchestrator, "_request_rpc_start")
-    def test_multi_node_success(self, mock_rpc, mock_start, mock_place):
+    async def test_multi_node_success(self, mock_rpc, mock_start, mock_place):
         mock_place.return_value = PlacementResult(
             success=True,
             selected_nodes=["master", "worker-1"],
@@ -134,7 +138,7 @@ class TestCreateInstanceDistributed:
             NodeId("worker-1"): _make_resources(10000),
         }
 
-        result = orch.create_instance(
+        result = await orch.create_instance(
             instance_id=InstanceId("i1"),
             model_id="llama-3.1-8b",
             model_path="/models/llama.gguf",
@@ -151,8 +155,9 @@ class TestCreateInstanceDistributed:
         assert len(result.tensor_split) == 2
         mock_start.assert_called_once()
 
+    @pytest.mark.asyncio
     @patch.object(PlacementEngine, "place")
-    def test_placement_failure(self, mock_place):
+    async def test_placement_failure(self, mock_place):
         mock_place.return_value = PlacementResult(
             success=False,
             selected_nodes=[],
@@ -162,7 +167,7 @@ class TestCreateInstanceDistributed:
         )
 
         orch = DistributedOrchestrator()
-        result = orch.create_instance(
+        result = await orch.create_instance(
             instance_id=InstanceId("i1"),
             model_id="llama-3.1-8b",
             model_path="/models/llama.gguf",

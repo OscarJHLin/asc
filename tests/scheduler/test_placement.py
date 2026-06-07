@@ -4,7 +4,10 @@ Placement 负责：
 - 选择最优节点组合来放置模型实例
 - 基于 VRAM、GPU 类型、网络拓扑等维度决策
 - 支持 Tensor Parallel 和 Pipeline Parallel 策略
+- 贪心算法替代穷举，O(n log n) 复杂度
 """
+
+import time
 
 from asc.scheduler.placement import PlacementEngine, PlacementResult, PlacementStrategy
 from asc.scheduler.topology import ClusterTopology, build_topology
@@ -215,3 +218,71 @@ class TestPlacementResult:
         )
         assert not result.success
         assert result.reason == "Insufficient VRAM"
+
+
+class TestPlacementEngineGreedyPerformance:
+    """贪心算法性能测试。"""
+
+    def test_large_cluster_100_nodes(self):
+        """100节点集群应在10ms内完成放置。"""
+        resources = {}
+        addresses = {}
+        for i in range(100):
+            resources[f"node-{i:03d}"] = _make_resources(
+                vram_free_mb=2000 + i * 50,
+                compute_score=1.0 + i * 0.1,
+            )
+            if i > 0:
+                addresses[f"node-{i:03d}"] = f"10.0.0.{i}:52415"
+
+        topo = build_topology("node-000", resources, addresses)
+        engine = PlacementEngine()
+
+        start = time.perf_counter()
+        result = engine.place(
+            model_vram_required_mb=20000,
+            topology=topo,
+            strategy=PlacementStrategy.TENSOR,
+        )
+        elapsed = time.perf_counter() - start
+
+        assert result.success
+        assert len(result.selected_nodes) > 0
+        assert elapsed < 0.1  # 100ms 安全阈值
+
+    def test_large_cluster_200_nodes(self):
+        """200节点集群应在50ms内完成放置。"""
+        resources = {}
+        addresses = {}
+        for i in range(200):
+            resources[f"node-{i:03d}"] = _make_resources(
+                vram_free_mb=1000 + i * 20,
+                compute_score=0.5 + i * 0.05,
+            )
+            if i > 0:
+                addresses[f"node-{i:03d}"] = f"10.0.0.{i}:52415"
+
+        topo = build_topology("node-000", resources, addresses)
+        engine = PlacementEngine()
+
+        start = time.perf_counter()
+        result = engine.place(
+            model_vram_required_mb=30000,
+            topology=topo,
+            strategy=PlacementStrategy.TENSOR,
+        )
+        elapsed = time.perf_counter() - start
+
+        assert result.success
+        assert elapsed < 0.1
+
+    def test_all_zero_vram_nodes(self):
+        """所有节点VRAM为0时应返回失败。"""
+        resources = {}
+        for i in range(10):
+            resources[f"node-{i}"] = _make_resources(vram_free_mb=0, compute_score=1.0)
+
+        topo = build_topology("node-0", resources, {})
+        engine = PlacementEngine()
+        result = engine.place(model_vram_required_mb=8000, topology=topo)
+        assert not result.success

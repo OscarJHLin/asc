@@ -15,6 +15,8 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
+from asc.api.prompt_converter import convert_messages_to_prompt
+
 
 @dataclass(frozen=True)
 class ChatCompletionRequest:
@@ -78,12 +80,15 @@ class ChatCompletionChunk:
     delta_content: str
     finish_reason: str | None = None
     created: int = field(default_factory=lambda: int(time.time()))
+    is_first: bool = False
 
     def to_dict(self) -> dict:
         delta: dict = {}
+        if self.is_first:
+            delta["role"] = "assistant"
         if self.delta_content:
             delta["content"] = self.delta_content
-        if self.finish_reason is None and not self.delta_content:
+        if self.finish_reason is None and not self.delta_content and not self.is_first:
             delta["role"] = "assistant"
 
         choice: dict = {
@@ -120,31 +125,8 @@ class ModelInfo:
 
 
 def messages_to_prompt(messages: list[dict]) -> str:
-    """将 OpenAI messages 数组转换为 llama.cpp prompt。
-
-    使用简单的角色标签格式：
-    [System]: ...
-    [User]: ...
-    [Assistant]: ...
-    """
-    parts: list[str] = []
-    for msg in messages:
-        role = msg.get("role", "user")
-        content = msg.get("content", "")
-        if isinstance(content, list):
-            # 多模态 content 数组，提取文本
-            content = " ".join(
-                item.get("text", "") for item in content if item.get("type") == "text"
-            )
-        tag = {
-            "system": "System",
-            "user": "User",
-            "assistant": "Assistant",
-        }.get(role, "User")
-        parts.append(f"[{tag}]: {content}")
-
-    parts.append("[Assistant]:")
-    return "\n".join(parts)
+    """将 OpenAI messages 数组转换为 llama.cpp prompt。"""
+    return convert_messages_to_prompt(messages)
 
 
 class OpenAIAdapter:
@@ -187,6 +169,7 @@ class OpenAIAdapter:
         request: ChatCompletionRequest,
         delta: str,
         finish_reason: str | None = None,
+        is_first: bool = False,
     ) -> ChatCompletionChunk:
         """创建流式 chunk。"""
         return ChatCompletionChunk(
@@ -194,4 +177,5 @@ class OpenAIAdapter:
             model=request.model,
             delta_content=delta,
             finish_reason=finish_reason,
+            is_first=is_first,
         )

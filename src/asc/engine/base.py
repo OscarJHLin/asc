@@ -1,14 +1,23 @@
 """Asc 推理引擎抽象接口。
 
-设计原则：
-- Builder 阶段：查找可执行文件、加载模型、预热 -> 返回 Engine
-- Engine 阶段：submit(task) / step() 循环 -> 产出推理结果
-- 构建与运行明确分离
+定义了推理引擎的统一契约，将"引擎构建"与"推理执行"明确分离：
+- Builder 阶段（EngineBuilder）：查找可执行文件、加载模型、预热 -> 返回 Engine
+- Engine 阶段（Engine）：submit(task) / step() 循环 -> 产出推理结果
+
+设计背景：
+    早期实现直接调用 llama-cli 命令行，每次推理都启动新进程，导致严重的
+    冷启动延迟（数秒到数十秒）。改为 llama-server 常驻进程 + HTTP API 后，
+    首次加载后推理延迟降至毫秒级，且天然支持流式 SSE 输出。
 
 关键特性：
 - 使用 llama-server 常驻进程 + HTTP API，而非每次启动 llama-cli
 - 天然支持流式输出（SSE）
 - 避免模型冷启动开销
+- 支持分布式推理（通过 --rpc 和 --tensor-split 参数）
+
+扩展指南：
+    若需支持其他推理后端（如 vLLM、TensorRT-LLM），只需实现 EngineBuilder
+    和 Engine 接口，无需修改上层调度代码。
 """
 
 from __future__ import annotations

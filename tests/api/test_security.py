@@ -8,112 +8,112 @@ from asc.api.security import ContentFilter, InputValidator, RateLimiter
 class TestRateLimiter:
     """RateLimiter 测试。"""
 
-    def test_is_allowed_up_to_limit(self):
+    async def test_is_allowed_up_to_limit(self):
         """允许请求直到达到上限。"""
         limiter = RateLimiter(max_requests=3, window_seconds=60.0)
         key = "test-key"
 
-        assert limiter.is_allowed(key) is True
-        assert limiter.is_allowed(key) is True
-        assert limiter.is_allowed(key) is True
+        assert await limiter.is_allowed(key) is True
+        assert await limiter.is_allowed(key) is True
+        assert await limiter.is_allowed(key) is True
 
-    def test_is_allowed_blocks_beyond_limit(self):
+    async def test_is_allowed_blocks_beyond_limit(self):
         """超过上限后拒绝请求。"""
         limiter = RateLimiter(max_requests=2, window_seconds=60.0)
         key = "test-key"
 
-        limiter.is_allowed(key)
-        limiter.is_allowed(key)
+        await limiter.is_allowed(key)
+        await limiter.is_allowed(key)
 
-        assert limiter.is_allowed(key) is False
+        assert await limiter.is_allowed(key) is False
 
-    def test_remaining_decreases(self):
+    async def test_remaining_decreases(self):
         """remaining 随请求减少。"""
         limiter = RateLimiter(max_requests=5, window_seconds=60.0)
         key = "test-key"
 
-        assert limiter.remaining(key) == 5
-        limiter.is_allowed(key)
-        assert limiter.remaining(key) == 4
-        limiter.is_allowed(key)
-        assert limiter.remaining(key) == 3
+        assert await limiter.remaining(key) == 5
+        await limiter.is_allowed(key)
+        assert await limiter.remaining(key) == 4
+        await limiter.is_allowed(key)
+        assert await limiter.remaining(key) == 3
 
-    def test_remaining_zero_at_limit(self):
+    async def test_remaining_zero_at_limit(self):
         """达到上限后 remaining 为 0。"""
         limiter = RateLimiter(max_requests=2, window_seconds=60.0)
         key = "test-key"
 
-        limiter.is_allowed(key)
-        limiter.is_allowed(key)
+        await limiter.is_allowed(key)
+        await limiter.is_allowed(key)
 
-        assert limiter.remaining(key) == 0
+        assert await limiter.remaining(key) == 0
 
-    def test_reset_clears_entry(self):
+    async def test_reset_clears_entry(self):
         """reset 后重新计数。"""
         limiter = RateLimiter(max_requests=2, window_seconds=60.0)
         key = "test-key"
 
-        limiter.is_allowed(key)
-        limiter.is_allowed(key)
-        assert limiter.is_allowed(key) is False
+        await limiter.is_allowed(key)
+        await limiter.is_allowed(key)
+        assert await limiter.is_allowed(key) is False
 
-        limiter.reset(key)
-        assert limiter.remaining(key) == 2
-        assert limiter.is_allowed(key) is True
+        await limiter.reset(key)
+        assert await limiter.remaining(key) == 2
+        assert await limiter.is_allowed(key) is True
 
-    def test_new_window_after_expiry(self):
+    async def test_new_window_after_expiry(self):
         """窗口过期后允许新请求。"""
         limiter = RateLimiter(max_requests=1, window_seconds=0.1)
         key = "test-key"
 
-        assert limiter.is_allowed(key) is True
-        assert limiter.is_allowed(key) is False
+        assert await limiter.is_allowed(key) is True
+        assert await limiter.is_allowed(key) is False
 
         time.sleep(0.15)
-        assert limiter.is_allowed(key) is True
+        assert await limiter.is_allowed(key) is True
 
-    def test_remaining_returns_max_for_new_window(self):
+    async def test_remaining_returns_max_for_new_window(self):
         """新窗口返回完整剩余次数。"""
         limiter = RateLimiter(max_requests=3, window_seconds=0.1)
         key = "test-key"
 
-        limiter.is_allowed(key)
-        limiter.is_allowed(key)
-        assert limiter.remaining(key) == 1
+        await limiter.is_allowed(key)
+        await limiter.is_allowed(key)
+        assert await limiter.remaining(key) == 1
 
         time.sleep(0.15)
-        assert limiter.remaining(key) == 3
+        assert await limiter.remaining(key) == 3
 
-    def test_cleanup_removes_expired(self):
+    async def test_cleanup_removes_expired(self):
         """cleanup 清理过期条目。"""
         limiter = RateLimiter(max_requests=3, window_seconds=0.1)
         key = "expired-key"
 
-        limiter.is_allowed(key)
+        await limiter.is_allowed(key)
         assert key in limiter._entries
 
         time.sleep(0.15)
-        limiter.cleanup()
+        await limiter.cleanup()
         assert key not in limiter._entries
 
-    def test_cleanup_keeps_active(self):
+    async def test_cleanup_keeps_active(self):
         """cleanup 保留未过期条目。"""
         limiter = RateLimiter(max_requests=3, window_seconds=60.0)
         key = "active-key"
 
-        limiter.is_allowed(key)
-        limiter.cleanup()
+        await limiter.is_allowed(key)
+        await limiter.cleanup()
         assert key in limiter._entries
 
-    def test_different_keys_independent(self):
+    async def test_different_keys_independent(self):
         """不同 key 互不影响。"""
         limiter = RateLimiter(max_requests=2, window_seconds=60.0)
 
-        assert limiter.is_allowed("key-a") is True
-        assert limiter.is_allowed("key-a") is True
-        assert limiter.is_allowed("key-b") is True
-        assert limiter.is_allowed("key-a") is False
-        assert limiter.is_allowed("key-b") is True
+        assert await limiter.is_allowed("key-a") is True
+        assert await limiter.is_allowed("key-a") is True
+        assert await limiter.is_allowed("key-b") is True
+        assert await limiter.is_allowed("key-a") is False
+        assert await limiter.is_allowed("key-b") is True
 
 
 class TestInputValidator:

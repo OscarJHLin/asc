@@ -12,6 +12,8 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 
+from asc.api.prompt_converter import convert_messages_to_prompt
+
 
 @dataclass(frozen=True)
 class AnthropicRequest:
@@ -153,23 +155,7 @@ def anthropic_messages_to_prompt(
     system: str | None = None,
 ) -> str:
     """将 Anthropic messages 转换为 llama.cpp prompt。"""
-    parts: list[str] = []
-
-    if system:
-        parts.append(f"[System]: {system}")
-
-    for msg in messages:
-        role = msg.get("role", "user")
-        content = msg.get("content", "")
-        if isinstance(content, list):
-            content = " ".join(
-                item.get("text", "") for item in content if item.get("type") == "text"
-            )
-        tag = {"user": "User", "assistant": "Assistant"}.get(role, "User")
-        parts.append(f"[{tag}]: {content}")
-
-    parts.append("[Assistant]:")
-    return "\n".join(parts)
+    return convert_messages_to_prompt(messages, system=system)
 
 
 class AnthropicAdapter:

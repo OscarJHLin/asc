@@ -1,4 +1,28 @@
-"""Asc CLI 入口。"""
+"""Asc CLI 入口。
+
+提供命令行界面，用于启动 Worker、Master 节点，查看状态和发现网络节点。
+
+支持的命令：
+- asc start   : 启动 Worker 节点（默认监听 52415 端口）
+- asc master  : 启动 Master 节点（默认监听 52414 端口）
+- asc status  : 查看本机硬件资源和 RPC Server 状态
+- asc discover: 扫描子网，发现潜在节点
+
+设计原则：
+- 简洁：每个命令对应一个明确操作，降低使用门槛
+- 信息丰富：启动时自动打印节点 ID、IP、硬件资源等信息
+- 信号处理：支持 Ctrl+C 优雅停止，清理资源
+
+使用示例：
+    # 启动 Worker
+    asc start --port 52415
+
+    # 启动 Master
+    asc master --host 0.0.0.0 --port 52414
+
+    # 查看状态
+    asc status
+"""
 
 from __future__ import annotations
 
@@ -103,6 +127,27 @@ def _cmd_discover(_args: argparse.Namespace) -> None:
     print("[Asc] 发现完成（发现功能需配合运行中的节点使用）")
 
 
+def _cmd_master(args: argparse.Namespace) -> None:
+    """启动 Master 节点。"""
+    import asyncio
+
+    from asc.master.main import MasterNode
+
+    node_id = args.node_id or _generate_node_id()
+    master = MasterNode(node_id=node_id)
+
+    print(f"[Asc] 启动 Master 节点: {node_id}")
+    print(f"[Asc] 监听地址: {args.host}:{args.port}")
+    print("[Asc] 按 Ctrl+C 停止节点")
+
+    try:
+        asyncio.run(master.run(host=args.host, port=args.port))
+    except KeyboardInterrupt:
+        print("\n[Asc] 正在停止 Master...")
+        asyncio.run(master.stop())
+        print("[Asc] Master 已停止")
+
+
 def main() -> None:
     """Asc 命令行入口。"""
     parser = argparse.ArgumentParser(
@@ -114,10 +159,16 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest="command", help="可用命令")
 
     # start 命令
-    start_parser = subparsers.add_parser("start", help="启动 Asc 节点")
+    start_parser = subparsers.add_parser("start", help="启动 Asc Worker 节点")
     start_parser.add_argument("--port", type=int, default=52415, help="服务端口")
     start_parser.add_argument("--no-worker", action="store_true", help="不启动 Worker")
     start_parser.add_argument("--no-discover", action="store_true", help="禁用节点发现")
+
+    # master 命令
+    master_parser = subparsers.add_parser("master", help="启动 Asc Master 节点")
+    master_parser.add_argument("--host", type=str, default="0.0.0.0", help="监听地址")
+    master_parser.add_argument("--port", type=int, default=52414, help="监听端口")
+    master_parser.add_argument("--node-id", type=str, default=None, help="节点 ID")
 
     # status 命令
     subparsers.add_parser("status", help="查看集群状态")
@@ -133,6 +184,7 @@ def main() -> None:
 
     command_map = {
         "start": _cmd_start,
+        "master": _cmd_master,
         "status": _cmd_status,
         "discover": _cmd_discover,
     }

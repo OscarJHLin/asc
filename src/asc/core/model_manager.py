@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Generator
 
-from asc.core.model_distributor import DistributionTarget, ModelDistributor
+from asc.core.model_distributor import DistributionResult, DistributionTarget, ModelDistributor
 from asc.core.model_downloader import (
     DownloadRequest,
     DownloadResult,
@@ -197,25 +197,27 @@ class ModelManager:
 
         return result
 
-    def distribute_model(
+    async def distribute_model(
         self,
         model_id: str,
         targets: list[DistributionTarget],
         send_chunk_fn: Any | None = None,
-    ) -> Generator[dict[str, Any], None, list]:
+        on_progress: Any | None = None,
+    ) -> list[DistributionResult]:
         """将模型分发到集群节点。
 
         Args:
             model_id: 模型 ID
             targets: 目标节点列表
             send_chunk_fn: 发送分片的回调函数
+            on_progress: 进度回调函数
 
-        Yields:
-            进度信息字典
+        Returns:
+            分发结果列表
         """
-        gen = self._distributor.distribute(model_id, targets, send_chunk_fn)
-        results = yield from gen
-        return results
+        return await self._distributor.distribute(
+            model_id, targets, send_chunk_fn, on_progress=on_progress,
+        )
 
     def download(
         self, repo_id: str, filename: str | None = None
@@ -301,10 +303,10 @@ class ModelManager:
                 model_id=model_id,
                 total_bytes=total_bytes,
                 downloaded_bytes=sum(
-                    c.size for c in chunks if c.chunk_index in state._completed
+                    c.size for c in chunks if c.chunk_index in state.completed_chunks
                 ),
                 total_chunks=len(chunks),
-                completed_chunks=len(state._completed),
+                completed_chunks=state.completed_count,
             )
 
         if not state.verify_file():

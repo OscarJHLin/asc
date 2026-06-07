@@ -148,6 +148,7 @@ class TestLlamaServerEngine:
             model_path="/path/to/model.gguf",
             base_url="http://127.0.0.1:8081",
             process=self._make_mock_process(),
+            http_client=MagicMock(),
         )
         assert engine.model_path == "/path/to/model.gguf"
         assert engine.base_url == "http://127.0.0.1:8081"
@@ -158,6 +159,7 @@ class TestLlamaServerEngine:
             model_path="/path/to/model.gguf",
             base_url="http://127.0.0.1:8081",
             process=self._make_mock_process(),
+            http_client=MagicMock(),
         )
         assert engine.status() == EngineStatus.IDLE
         engine._set_status(EngineStatus.READY)
