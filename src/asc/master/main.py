@@ -946,10 +946,14 @@ class MasterNode:
             target_nodes[str(node_id)] = {"conn_id": conn_id}
             # 获取硬件资源信息
             res = self._node_resources.get(str(node_id), {})
+            vram_free = 0
+            gpus = res.get("gpus", [])
+            if gpus and isinstance(gpus[0], dict):
+                vram_free = gpus[0].get("vram_free_mb", 0)
             node_resources_map[str(node_id)] = {
                 "ip": ip,
                 "port": port,
-                "vram_free_mb": res.get("gpus", [{}])[0].get("vram_free_mb", 0) if res.get("gpus") else 0,
+                "vram_free_mb": vram_free,
             }
 
         if not target_nodes:

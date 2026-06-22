@@ -946,6 +946,7 @@ def create_app(
                         target_nodes = {}
                         node_resources_map = {}
                         state = app.state.cluster_state
+                        node_resources = getattr(app.state, "node_resources", {})
 
                         # 需要从 tcp_server 获取 conn_id -> node_id 映射
                         # 这里使用 _conn_node_map 如果可用，否则跳过分发
@@ -964,9 +965,18 @@ def create_app(
                             ip = ninfo.ip
                             port = ninfo.port
                             target_nodes[str(nid)] = {"conn_id": conn_id}
+
+                            # 从 node_resources 获取 VRAM 信息
+                            res = node_resources.get(str(nid), {})
+                            gpus = res.get("gpus", [])
+                            vram_free = 0
+                            if gpus and isinstance(gpus[0], dict):
+                                vram_free = gpus[0].get("vram_free_mb", 0)
+
                             node_resources_map[str(nid)] = {
-                                "ip": ip, "port": port,
-                                "vram_free_mb": 0,  # 从注册信息获取
+                                "ip": ip,
+                                "port": port,
+                                "vram_free_mb": vram_free,
                             }
 
                         if target_nodes:

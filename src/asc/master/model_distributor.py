@@ -420,7 +420,10 @@ class ModelDistributor:
                 continue
             nid = result.node_id
             res = node_resources.get(nid, {})
-            vram = res.get("vram_free_mb", 0)
+            vram = 0
+            gpus = res.get("gpus", [])
+            if gpus:
+                vram = gpus[0].get("vram_free_mb", 0) if isinstance(gpus[0], dict) else 0
             if vram > 0:
                 node_vram[nid] = vram
                 node_info[nid] = res

@@ -966,14 +966,19 @@ class WorkerAgent:
             self._model_receive_state.pop(model_id, None)
 
         # 回复 MODEL_CHUNK_ACK
-        if self._client is not None:
+        if self._client is not None and self._client.is_connected:
             ack_payload = encode_model_chunk_ack_payload(
                 model_id=model_id,
                 chunk_index=chunk_index,
                 success=success,
             )
             ack_frame = Frame(frame_type=FrameType.MODEL_CHUNK_ACK, payload=ack_payload)
-            await self._client.send_frame(ack_frame)
+            try:
+                await self._client.send_frame(ack_frame)
+            except Exception as e:
+                logger.warning("发送 MODEL_CHUNK_ACK 失败: %s", e)
+        else:
+            logger.warning("无法发送 MODEL_CHUNK_ACK: 客户端未连接")
 
     async def _run_inference(self, task_id: str, payload: dict) -> None:
         """执行推理任务。
