@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from fastapi.testclient import TestClient
 
+from asc.api.auth import _init_default_store
 from asc.api.openai_adapter import ChatCompletionRequest, OpenAIAdapter
 from asc.api.server import _stream_chat, create_app
 
@@ -166,6 +167,27 @@ class TestStreamChatSSEFormat:
         # CJK 应该逐字输出
         assert content_chunks == ["你", "好", "世", "界"]
 
+    def test_first_chunk_includes_role(self):
+        """第一个 SSE chunk 包含 role: 'assistant'（OpenAI 标准兼容）。"""
+        adapter = OpenAIAdapter()
+        request = self._make_request()
+        mock_engine = self._make_async_engine("Hello")
+
+        chunks = self._collect_stream(_stream_chat(adapter, request, "Hi", mock_engine))
+        # 第一个 chunk 应包含 role: "assistant"
+        first_payload_str = chunks[0].removeprefix("data: ").removesuffix("\n\n")
+        first_payload = json.loads(first_payload_str)
+        delta = first_payload["choices"][0]["delta"]
+        assert delta.get("role") == "assistant"
+        assert "content" in delta
+
+        # 后续 chunk 不应包含 role
+        for chunk in chunks[1:-2]:  # 排除第一个、final chunk 和 [DONE]
+            payload_str = chunk.removeprefix("data: ").removesuffix("\n\n")
+            payload = json.loads(payload_str)
+            delta = payload["choices"][0]["delta"]
+            assert "role" not in delta
+
 
 # --- 通过 HTTP 端点集成测试 ---
 
@@ -174,9 +196,10 @@ class TestStreamingEndpoint:
     """通过 FastAPI TestClient 测试流式端点。"""
 
     def _make_client(self, **kwargs):
-        os.environ["ASC_ALLOW_NO_AUTH"] = "1"
+        os.environ["ASC_API_KEY"] = "test-key"
+        _init_default_store()
         app = create_app(**kwargs)
-        return TestClient(app)
+        return TestClient(app, headers={"X-API-Key": "test-key"})
 
     def _make_async_engine(self, return_value="Hello"):
         """创建支持 await 的 mock 引擎。"""

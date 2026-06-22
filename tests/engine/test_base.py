@@ -5,6 +5,8 @@
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from asc.engine.base import (
     Engine,
     EngineBuilder,
@@ -113,6 +115,24 @@ class TestEngineAbstract:
 
     def test_engine_has_close(self):
         assert hasattr(Engine, "close")
+
+    def test_engine_has_submit_async_stream(self):
+        """Engine 基类定义了 submit_async_stream 方法。"""
+        assert hasattr(Engine, "submit_async_stream")
+
+    def test_submit_async_stream_default_raises(self):
+        """未覆盖 submit_async_stream 的子类调用时抛出 NotImplementedError。"""
+        import asyncio
+
+        class MinimalEngine(Engine):
+            def submit(self, request): return ""
+            def step(self): return []
+            def close(self): pass
+            def status(self): return EngineStatus.IDLE
+
+        engine = MinimalEngine()
+        with pytest.raises(NotImplementedError, match="submit_async_stream"):
+            asyncio.run(engine.submit_async_stream(InferenceRequest(prompt="test")).__anext__())
 
 
 class TestLlamaServerBuilder:

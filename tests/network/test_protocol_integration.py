@@ -264,7 +264,7 @@ class TestTaskDispatchLifecycle:
         restored = _full_stack_roundtrip(
             payload=cancel.to_dict(),
             channel=Channel.TASK_DISPATCH,
-            msg_type=MessageType.TASK_CANCEL_MSG,
+            msg_type=MessageType.CANCEL_TASK,
         )
         cancel_back = TaskCancelMessage.from_dict(restored.message.payload)
         assert cancel_back.task_id == "task-001"

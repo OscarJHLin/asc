@@ -3,8 +3,9 @@
 负责 Master 侧的分布式推理编排：
 - 接收 CreateInstance 命令
 - 使用 PlacementEngine 选择最优节点组合
-- 使用 TensorSplitCalculator 计算 tensor-split 参数
-- 向 Workers 发送启动 RPC Server 请求
+- Tensor 策略：使用 TensorSplitCalculator 计算 tensor-split 参数，启动带 --rpc 的 llama-server
+- Pipeline 策略：使用 PipelinePlanner 分配层，每个阶段启动独立 llama-server
+- 通过 Binary Frame 协议向 Workers 发送 RPC 启动/停止命令
 - 等待所有 RPC Server 就绪
 - 启动 llama-server（带 --rpc 和 --tensor-split 参数）
 """
@@ -16,9 +17,10 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-import httpx
-
 from asc.engine.llama_server import LlamaServerBuilder, LlamaServerEngine
+from asc.network.protocol import Channel, Envelope, Message, MessageType
+from asc.network.transport import TCPServer
+from asc.scheduler.pipeline import PipelinePlan, PipelinePlanner
 from asc.scheduler.placement import PlacementEngine, PlacementStrategy
 from asc.scheduler.splitter import TensorSplitCalculator
 from asc.scheduler.topology import ClusterTopology, build_topology
@@ -38,6 +40,7 @@ class OrchestratorResult:
     node_ids: list[NodeId] = field(default_factory=list)
     rpc_endpoints: list[str] = field(default_factory=list)
     tensor_split: list[float] = field(default_factory=list)
+    pipeline_plan: PipelinePlan | None = None
     error: str = ""
 
 
@@ -48,10 +51,56 @@ class DistributedOrchestrator:
         self,
         placement_engine: PlacementEngine | None = None,
         split_calculator: TensorSplitCalculator | None = None,
+        pipeline_planner: PipelinePlanner | None = None,
+        tcp_server: TCPServer | None = None,
+        conn_node_map: dict[str, str] | None = None,
     ) -> None:
         self._placement = placement_engine or PlacementEngine()
         self._splitter = split_calculator or TensorSplitCalculator()
+        self._pipeline_planner = pipeline_planner or PipelinePlanner()
         self._engines: dict[InstanceId, LlamaServerEngine] = {}
+        self._tcp_server = tcp_server
+        self._conn_node_map = conn_node_map or {}
+        # node_id -> conn_id 反向映射
+        self._node_conn_map: dict[str, str] = {
+            v: k for k, v in self._conn_node_map.items()
+        }
+        # 等待中的 RPC ACK 和 RESOURCE_RESPONSE: request_id -> asyncio.Future
+        self._pending_acks: dict[str, asyncio.Future] = {}
+
+    def set_tcp_server(self, tcp_server: TCPServer) -> None:
+        """设置 TCPServer 实例。"""
+        self._tcp_server = tcp_server
+
+    def update_conn_map(self, conn_node_map: dict[str, str]) -> None:
+        """更新连接映射。"""
+        self._conn_node_map = conn_node_map
+        self._node_conn_map = {v: k for k, v in conn_node_map.items()}
+
+    def _get_conn_id(self, node_id: NodeId | str) -> str | None:
+        """根据 node_id 查找对应的 conn_id。"""
+        return self._node_conn_map.get(str(node_id))
+
+    async def handle_rpc_start_ack(self, envelope: Envelope) -> None:
+        """处理 RPC_START_ACK 响应。"""
+        request_id = envelope.message.payload.get("request_id", "")
+        future = self._pending_acks.pop(request_id, None)
+        if future is not None and not future.done():
+            future.set_result(envelope)
+
+    async def handle_rpc_stop_ack(self, envelope: Envelope) -> None:
+        """处理 RPC_STOP_ACK 响应。"""
+        request_id = envelope.message.payload.get("request_id", "")
+        future = self._pending_acks.pop(request_id, None)
+        if future is not None and not future.done():
+            future.set_result(envelope)
+
+    async def handle_resource_response(self, envelope: Envelope) -> None:
+        """处理 RESOURCE_RESPONSE 响应。"""
+        request_id = envelope.message.payload.get("request_id", "")
+        future = self._pending_acks.pop(request_id, None)
+        if future is not None and not future.done():
+            future.set_result(envelope)
 
     async def create_instance(
         self,
@@ -104,7 +153,18 @@ class DistributedOrchestrator:
                 model_path=model_path,
             )
 
-        # 4. 多节点分布式：启动 Worker RPC Servers
+        # 4. Pipeline 策略：按层分片，每阶段独立 llama-server
+        if strategy == PlacementStrategy.PIPELINE:
+            return await self._create_pipeline_instance(
+                instance_id=instance_id,
+                model_id=model_id,
+                model_path=model_path,
+                selected_node_ids=selected_node_ids,
+                node_resources=node_resources,
+                nodes=nodes,
+            )
+
+        # 5. Tensor 策略：启动 Worker RPC Servers
         worker_node_ids = [
             nid for nid in selected_node_ids
             if nodes[nid].ip not in ("127.0.0.1", "localhost")
@@ -156,7 +216,7 @@ class DistributedOrchestrator:
             tensor_split=split_result.splits,
         )
 
-    def delete_instance(
+    async def delete_instance(
         self,
         instance_id: InstanceId,
         node_ids: list[NodeId],
@@ -169,10 +229,15 @@ class DistributedOrchestrator:
             engine.close()
             logger.info("实例 %s 的 llama-server 已停止", instance_id)
 
-        # 停止 Worker RPC Servers
+        # 停止 Worker RPC Servers（异步，不阻塞事件循环）
+        stop_tasks = []
         for node_id in node_ids:
             if node_id in nodes:
-                self._stop_worker_rpc_server(node_id, nodes[node_id])
+                stop_tasks.append(
+                    self._stop_worker_rpc_server(node_id, nodes[node_id])
+                )
+        if stop_tasks:
+            await asyncio.gather(*stop_tasks, return_exceptions=True)
 
     # ------------------------------------------------------------------
     # 私有方法
@@ -270,6 +335,76 @@ class DistributedOrchestrator:
                 error=f"启动本地 llama-server 失败: {e}",
             )
 
+    async def _create_pipeline_instance(
+        self,
+        instance_id: InstanceId,
+        model_id: str,
+        model_path: str,
+        selected_node_ids: list[NodeId],
+        node_resources: dict[NodeId, NodeResources],
+        nodes: dict[NodeId, NodeInfo],
+    ) -> OrchestratorResult:
+        """创建 Pipeline 并行实例。
+
+        使用 PipelinePlanner 按节点 VRAM 比例分配模型层，
+        每个阶段在对应节点上启动独立的 llama-server。
+
+        注意：当前实现为规划 + 启动阶段。实际的层间数据路由
+        （前一阶段输出传给后一阶段）需要在推理执行层实现。
+        """
+        # 1. 按 VRAM 比例规划 Pipeline 阶段
+        node_vram = {
+            str(nid): node_resources[nid].total_vram_free_mb
+            for nid in selected_node_ids
+            if nid in node_resources
+        }
+        # 默认 32 层，实际应从模型元数据获取
+        pipeline_plan = self._pipeline_planner.plan_by_vram(
+            total_layers=32,
+            node_vram_mb=node_vram,
+        )
+
+        if not pipeline_plan.is_valid:
+            return OrchestratorResult(
+                success=False,
+                error="Pipeline 分片规划失败：无法有效分配层",
+                pipeline_plan=pipeline_plan,
+            )
+
+        # 2. 为每个阶段启动 llama-server
+        stage_engines: dict[str, LlamaServerEngine] = {}
+        for stage in pipeline_plan.stages:
+            try:
+                engine = await self._start_llama_server(
+                    model_path=model_path,
+                    rpc_endpoints=[],
+                    tensor_split=[1.0],
+                )
+                stage_engines[stage.node_id] = engine
+            except Exception as e:
+                # 清理已启动的引擎
+                for eng in stage_engines.values():
+                    eng.close()
+                return OrchestratorResult(
+                    success=False,
+                    error=f"Pipeline 阶段 {stage.node_id} 启动失败: {e}",
+                    pipeline_plan=pipeline_plan,
+                )
+
+        # 3. 存储引擎（使用 instance_id 前缀区分多阶段）
+        for node_id, engine in stage_engines.items():
+            stage_key = InstanceId(f"{instance_id}::{node_id}")
+            self._engines[stage_key] = engine
+
+        return OrchestratorResult(
+            success=True,
+            instance_id=instance_id,
+            node_ids=[NodeId(s.node_id) for s in pipeline_plan.stages],
+            rpc_endpoints=[],
+            tensor_split=[],
+            pipeline_plan=pipeline_plan,
+        )
+
     async def _start_worker_rpc_servers(
         self,
         node_ids: list[NodeId],
@@ -305,52 +440,105 @@ class DistributedOrchestrator:
     async def _request_rpc_start(self, node_info: NodeInfo, timeout: float) -> str | None:
         """请求单个 Worker 启动 RPC Server。
 
-        通过 HTTP POST 调用 Worker 的 /rpc/start 端点，
-        返回 Worker 汇报的 RPC 端点地址，失败时返回 None。
+        通过 Binary Frame 协议发送 RPC_START 命令，
+        等待 Worker 回复 RPC_START_ACK，返回 RPC 端点地址。
         """
-        url = f"http://{node_info.ip}:{node_info.port}/rpc/start"
+        conn_id = self._get_conn_id(node_info.node_id)
+        if conn_id is None or self._tcp_server is None:
+            logger.warning("无法找到节点 %s 的 TCP 连接", node_info.node_id)
+            return None
+
+        import uuid
+        request_id = str(uuid.uuid4())
+
+        envelope = Envelope(
+            channel=Channel.COMMANDS,
+            message=Message(
+                type=MessageType.RPC_START,
+                sender_id="master",
+                payload={
+                    "request_id": request_id,
+                    "node_id": str(node_info.node_id),
+                },
+            ),
+            target=str(node_info.node_id),
+        )
+
+        # 注册等待 Future
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[Envelope] = loop.create_future()
+        self._pending_acks[request_id] = future
+
         try:
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(url, timeout=timeout)
-            resp.raise_for_status()
-            data = resp.json()
-            endpoint = data.get("endpoint")
-            if endpoint:
+            sent = await self._tcp_server.send(conn_id, envelope)
+            if not sent:
+                logger.warning("发送 RPC_START 到 %s 失败", node_info.ip)
+                return None
+
+            # 等待 ACK
+            ack_envelope = await asyncio.wait_for(future, timeout=timeout)
+            payload = ack_envelope.message.payload
+            status = payload.get("status", "error")
+            endpoint = payload.get("endpoint")
+
+            if status == "ok" and endpoint:
                 logger.info("Worker %s RPC 启动成功: %s", node_info.ip, endpoint)
                 return endpoint
-            logger.warning("Worker %s RPC 响应缺少 endpoint 字段", node_info.ip)
+            error = payload.get("error", "未知错误")
+            logger.warning("Worker %s RPC 启动失败: %s", node_info.ip, error)
             return None
-        except httpx.ConnectError:
-            logger.warning("无法连接到 Worker %s:%s", node_info.ip, node_info.port)
-            return None
-        except httpx.TimeoutException:
-            logger.warning("连接 Worker %s:%s 超时", node_info.ip, node_info.port)
-            return None
-        except httpx.HTTPStatusError as e:
-            logger.warning("Worker %s 返回错误状态: %s", node_info.ip, e.response.status_code)
+        except asyncio.TimeoutError:
+            logger.warning("等待 Worker %s RPC_START_ACK 超时", node_info.ip)
             return None
         except Exception:
             logger.exception("请求 Worker %s RPC 启动时发生未知错误", node_info.ip)
             return None
+        finally:
+            self._pending_acks.pop(request_id, None)
 
-    def _stop_worker_rpc_server(self, node_id: NodeId, node_info: NodeInfo) -> None:
-        """请求 Worker 停止 RPC Server。"""
-        url = f"http://{node_info.ip}:{node_info.port}/rpc/stop"
+    async def _stop_worker_rpc_server(self, node_id: NodeId, node_info: NodeInfo) -> None:
+        """请求 Worker 停止 RPC Server（通过 Binary Frame 协议）。"""
+        conn_id = self._get_conn_id(node_id)
+        if conn_id is None or self._tcp_server is None:
+            logger.warning("无法找到节点 %s 的 TCP 连接，跳过 RPC 停止", node_id)
+            return
+
+        import uuid
+        request_id = str(uuid.uuid4())
+
+        envelope = Envelope(
+            channel=Channel.COMMANDS,
+            message=Message(
+                type=MessageType.RPC_STOP,
+                sender_id="master",
+                payload={
+                    "request_id": request_id,
+                    "node_id": str(node_id),
+                },
+            ),
+            target=str(node_id),
+        )
+
+        # 注册等待 Future
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[Envelope] = loop.create_future()
+        self._pending_acks[request_id] = future
+
         try:
-            resp = httpx.post(url, timeout=10.0)
-            resp.raise_for_status()
+            sent = await self._tcp_server.send(conn_id, envelope)
+            if not sent:
+                logger.warning("发送 RPC_STOP 到 %s 失败", node_info.ip)
+                return
+
+            # 等待 ACK（短超时，停止操作不应阻塞太久）
+            await asyncio.wait_for(future, timeout=10.0)
             logger.info("Worker %s RPC 已停止", node_info.ip)
-        except httpx.ConnectError:
-            logger.warning("停止 Worker %s:%s RPC 时无法连接", node_info.ip, node_info.port)
-        except httpx.TimeoutException:
-            logger.warning("停止 Worker %s:%s RPC 时超时", node_info.ip, node_info.port)
-        except httpx.HTTPStatusError as e:
-            logger.warning(
-                "停止 Worker %s RPC 时返回错误状态: %s",
-                node_info.ip, e.response.status_code,
-            )
+        except asyncio.TimeoutError:
+            logger.warning("等待 Worker %s RPC_STOP_ACK 超时", node_info.ip)
         except Exception:
             logger.exception("停止 Worker %s RPC 时发生未知错误", node_info.ip)
+        finally:
+            self._pending_acks.pop(request_id, None)
 
     def _calculate_tensor_split(
         self,
@@ -396,19 +584,21 @@ class DistributedOrchestrator:
         rpc_endpoints: list[str],
         tensor_split: list[float],
     ) -> LlamaServerEngine:
-        """启动 llama-server（异步，不阻塞事件循环）。
+        """启动 llama-server（原生异步，不阻塞事件循环）。
 
-        使用 asyncio.to_thread 将阻塞的启动流程放到线程池执行，
-        避免阻塞事件循环数十秒。
+        使用 asyncio.create_subprocess_exec 启动子进程，
+        使用 asyncio.sleep + httpx.AsyncClient 进行健康检查，
+        完全不阻塞事件循环，无需 asyncio.to_thread 包装。
         """
         builder = LlamaServerBuilder(
             model_path=model_path,
             rpc_servers=rpc_endpoints,
             tensor_split=tensor_split,
         )
-        # 启动并等待就绪（在线程池中执行，避免阻塞事件循环）
-        await asyncio.to_thread(lambda: list(builder.load()))
-        return await asyncio.to_thread(builder.build)
+        # 使用原生异步路径
+        async for _ in builder.aload():
+            pass
+        return await builder.abuild()
 
     async def _retry_with_fewer_nodes(
         self,
@@ -454,3 +644,59 @@ class DistributedOrchestrator:
             strategy=strategy,
             _retry_depth=_retry_depth + 1,
         )
+
+    async def query_resources(
+        self,
+        node_id: NodeId,
+        timeout: float = 10.0,
+    ) -> dict[str, Any] | None:
+        """通过 Binary Frame 协议查询 Worker 节点资源。
+
+        Args:
+            node_id: 目标节点 ID
+            timeout: 等待响应超时时间
+
+        Returns:
+            资源信息字典，失败返回 None
+        """
+        conn_id = self._get_conn_id(node_id)
+        if conn_id is None or self._tcp_server is None:
+            logger.warning("无法找到节点 %s 的 TCP 连接", node_id)
+            return None
+
+        import uuid
+        request_id = str(uuid.uuid4())
+
+        envelope = Envelope(
+            channel=Channel.COMMANDS,
+            message=Message(
+                type=MessageType.RESOURCE_QUERY,
+                sender_id="master",
+                payload={
+                    "request_id": request_id,
+                    "node_id": str(node_id),
+                },
+            ),
+            target=str(node_id),
+        )
+
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[Envelope] = loop.create_future()
+        self._pending_acks[request_id] = future
+
+        try:
+            sent = await self._tcp_server.send(conn_id, envelope)
+            if not sent:
+                logger.warning("发送 RESOURCE_QUERY 到 %s 失败", node_id)
+                return None
+
+            ack_envelope = await asyncio.wait_for(future, timeout=timeout)
+            return ack_envelope.message.payload
+        except asyncio.TimeoutError:
+            logger.warning("等待 Worker %s RESOURCE_RESPONSE 超时", node_id)
+            return None
+        except Exception:
+            logger.exception("查询 Worker %s 资源时发生未知错误", node_id)
+            return None
+        finally:
+            self._pending_acks.pop(request_id, None)

@@ -314,7 +314,7 @@ FAILED  -> HEALTHY（恢复后重新注册）
 
 **流式输出说明：**
 
-当前实现为"伪流式"：先通过 `engine.submit_async()` 获取完整输出，再按 token 拆分发送 SSE chunk。这是因为 `llama-server` 的流式 API 需要额外适配。未来版本将改为真正的逐 token 流式传输。
+通过 `engine.submit_async_stream()` 实现真正的逐 token 流式传输。引擎底层使用 httpx 流式 HTTP 连接消费 `llama-server` 的 SSE 响应，每个 token 生成后立即通过 SSE chunk 推送给客户端，无需等待完整输出。
 
 #### 2.5.2 安全模块 (`security.py`)
 

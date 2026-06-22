@@ -18,6 +18,7 @@ class GPUInfo:
     vram_free_mb: int
     vendor: str = ""
     compute_capability: str = ""
+    detection_platform: str = ""  # "CUDA"/"ROCm"/"Metal"/"Vulkan"/"OpenCL"
 
     @property
     def vram_used_mb(self) -> int:

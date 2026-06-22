@@ -338,6 +338,8 @@ class TestGracefulStop:
                 port=9999,
                 node_id="test-node-1",
                 on_message=agent._on_message,
+                on_frame=agent._on_frame,
+                auth_token=None,
             )
             mock_client.connect.assert_awaited_once()
 

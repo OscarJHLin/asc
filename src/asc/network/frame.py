@@ -10,7 +10,7 @@
     同一套流式读取逻辑，大幅降低维护复杂度。
 
 帧类型按功能分区:
-- 0x00:       Envelope 帧 (控制面 JSON 消息，兼容旧协议)
+- 0x00:       Envelope 帧 (控制面消息，MessagePack/JSON payload)
 - 0x01-0x0F:  控制帧 (心跳/ACK/NACK)
 - 0x10-0x1F:  任务帧 (分派/接受/进度/结果/取消)
 - 0x20-0x2F:  容量帧 (上报/查询/响应)
@@ -158,10 +158,10 @@ def decode_frame(data: bytes) -> Frame:
 def encode_envelope_frame(envelope: Envelope) -> Frame:
     """将 Envelope 编码为 ENVELOPE 帧。
 
-    payload 为 Envelope 的 JSON 字节。
+    payload 为 Envelope 的 MessagePack 字节（默认高性能格式）。
     """
-    json_bytes = encode_envelope(envelope)
-    return Frame(frame_type=FrameType.ENVELOPE, payload=json_bytes)
+    payload_bytes = encode_envelope(envelope)
+    return Frame(frame_type=FrameType.ENVELOPE, payload=payload_bytes)
 
 
 def decode_envelope_frame(frame: Frame) -> Envelope:
@@ -220,8 +220,13 @@ async def read_frame_from_stream(reader: asyncio.StreamReader) -> Frame | None:
     except asyncio.IncompleteReadError:
         return None
 
+    try:
+        frame_type = FrameType(ftype)
+    except ValueError:
+        return None
+
     return Frame(
-        frame_type=FrameType(ftype),
+        frame_type=frame_type,
         payload=payload,
     )
 

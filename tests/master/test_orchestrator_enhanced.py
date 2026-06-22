@@ -3,19 +3,19 @@
 覆盖审计中发现的关键缺口：
 - _handle_rpc_failures 处理部分 RPC 失败
 - _retry_with_fewer_nodes 最大深度限制
-- _request_rpc_start 各种 httpx 异常
-- _stop_worker_rpc_server 各种 httpx 异常
+- _request_rpc_start Binary Frame 协议
+- _stop_worker_rpc_server Binary Frame 协议
 - _create_local_instance 失败
 - _calculate_tensor_split 无本地节点
 - _build_topology 空节点
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
-import httpx
 import pytest
 
 from asc.master.orchestrator import DistributedOrchestrator, OrchestratorResult
+from asc.network.protocol import Channel, Envelope, Message, MessageType
 from asc.scheduler.placement import PlacementEngine, PlacementResult, PlacementStrategy
 from asc.scheduler.splitter import TensorSplitResult
 from asc.types import InstanceId, NodeId
@@ -181,157 +181,190 @@ class TestRetryWithFewerNodes:
 
 
 class TestRequestRpcStart:
-    """_request_rpc_start 各种 httpx 异常测试。"""
+    """_request_rpc_start Binary Frame 协议测试。"""
 
     @pytest.mark.asyncio
-    async def test_connect_error(self):
-        """连接失败应返回 None。"""
+    async def test_no_tcp_connection(self):
+        """无 TCP 连接时应返回 None。"""
         orch = DistributedOrchestrator()
         node_info = StateNodeInfo(node_id=NodeId("w1"), ip="10.0.0.2", port=52415)
 
-        with patch("httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client.post = AsyncMock(side_effect=httpx.ConnectError("Connection refused"))
-            mock_client_cls.return_value = mock_client
-
-            result = await orch._request_rpc_start(node_info, timeout=5.0)
-
+        result = await orch._request_rpc_start(node_info, timeout=1.0)
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_timeout_error(self):
-        """连接超时应返回 None。"""
-        orch = DistributedOrchestrator()
-        node_info = StateNodeInfo(node_id=NodeId("w1"), ip="10.0.0.2", port=52415)
+    async def test_send_failure(self):
+        """发送失败应返回 None。"""
+        mock_tcp = MagicMock()
 
-        with patch("httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client.post = AsyncMock(side_effect=httpx.TimeoutException("Timeout"))
-            mock_client_cls.return_value = mock_client
+        async def mock_send(conn_id, envelope):
+            return False
 
-            result = await orch._request_rpc_start(node_info, timeout=5.0)
+        mock_tcp.send = mock_send
 
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_http_status_error(self):
-        """HTTP 错误状态应返回 None。"""
-        orch = DistributedOrchestrator()
-        node_info = StateNodeInfo(node_id=NodeId("w1"), ip="10.0.0.2", port=52415)
-
-        mock_resp = MagicMock()
-        mock_resp.status_code = 500
-        mock_resp.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "Server Error", request=MagicMock(), response=mock_resp
+        orch = DistributedOrchestrator(
+            tcp_server=mock_tcp,
+            conn_node_map={"conn-1": "w1"},
         )
+        node_info = StateNodeInfo(node_id=NodeId("w1"), ip="10.0.0.2", port=52415)
 
-        with patch("httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client.post = AsyncMock(return_value=mock_resp)
-            mock_client_cls.return_value = mock_client
-
-            result = await orch._request_rpc_start(node_info, timeout=5.0)
-
+        result = await orch._request_rpc_start(node_info, timeout=1.0)
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_missing_endpoint_in_response(self):
-        """响应中缺少 endpoint 字段应返回 None。"""
-        orch = DistributedOrchestrator()
+    async def test_timeout(self):
+        """等待 ACK 超时应返回 None。"""
+        mock_tcp = MagicMock()
+
+        async def mock_send(conn_id, envelope):
+            # 不回复 ACK，模拟超时
+            return True
+
+        mock_tcp.send = mock_send
+
+        orch = DistributedOrchestrator(
+            tcp_server=mock_tcp,
+            conn_node_map={"conn-1": "w1"},
+        )
         node_info = StateNodeInfo(node_id=NodeId("w1"), ip="10.0.0.2", port=52415)
 
-        mock_resp = MagicMock()
-        mock_resp.raise_for_status = MagicMock()
-        mock_resp.json.return_value = {"status": "ok"}  # 无 endpoint
+        result = await orch._request_rpc_start(node_info, timeout=0.1)
+        assert result is None
 
-        with patch("httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client.post = AsyncMock(return_value=mock_resp)
-            mock_client_cls.return_value = mock_client
+    @pytest.mark.asyncio
+    async def test_error_response(self):
+        """Worker 返回错误状态应返回 None。"""
+        mock_tcp = MagicMock()
 
-            result = await orch._request_rpc_start(node_info, timeout=5.0)
+        async def mock_send(conn_id, envelope):
+            request_id = envelope.message.payload.get("request_id", "")
+            ack = Envelope(
+                channel=Channel.COMMANDS,
+                message=Message(
+                    type=MessageType.RPC_START_ACK,
+                    sender_id="w1",
+                    payload={"request_id": request_id, "status": "error", "error": "not found"},
+                ),
+            )
+            await orch.handle_rpc_start_ack(ack)
+            return True
 
+        mock_tcp.send = mock_send
+
+        orch = DistributedOrchestrator(
+            tcp_server=mock_tcp,
+            conn_node_map={"conn-1": "w1"},
+        )
+        node_info = StateNodeInfo(node_id=NodeId("w1"), ip="10.0.0.2", port=52415)
+
+        result = await orch._request_rpc_start(node_info, timeout=5.0)
         assert result is None
 
     @pytest.mark.asyncio
     async def test_successful_rpc_start(self):
         """成功启动 RPC 应返回 endpoint。"""
-        orch = DistributedOrchestrator()
+        mock_tcp = MagicMock()
+
+        async def mock_send(conn_id, envelope):
+            request_id = envelope.message.payload.get("request_id", "")
+            ack = Envelope(
+                channel=Channel.COMMANDS,
+                message=Message(
+                    type=MessageType.RPC_START_ACK,
+                    sender_id="w1",
+                    payload={"request_id": request_id, "status": "ok", "endpoint": "10.0.0.2:50052", "port": 50052},
+                ),
+            )
+            await orch.handle_rpc_start_ack(ack)
+            return True
+
+        mock_tcp.send = mock_send
+
+        orch = DistributedOrchestrator(
+            tcp_server=mock_tcp,
+            conn_node_map={"conn-1": "w1"},
+        )
         node_info = StateNodeInfo(node_id=NodeId("w1"), ip="10.0.0.2", port=52415)
 
-        mock_resp = MagicMock()
-        mock_resp.raise_for_status = MagicMock()
-        mock_resp.json.return_value = {"endpoint": "10.0.0.2:50052"}
-
-        with patch("httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client.post = AsyncMock(return_value=mock_resp)
-            mock_client_cls.return_value = mock_client
-
-            result = await orch._request_rpc_start(node_info, timeout=5.0)
-
+        result = await orch._request_rpc_start(node_info, timeout=5.0)
         assert result == "10.0.0.2:50052"
 
 
 class TestStopWorkerRpcServer:
-    """_stop_worker_rpc_server 各种 httpx 异常测试。"""
+    """_stop_worker_rpc_server Binary Frame 协议测试。"""
 
-    @patch("httpx.post")
-    def test_connect_error(self, mock_post):
-        """连接失败不应抛出异常。"""
-        mock_post.side_effect = httpx.ConnectError("Connection refused")
+    @pytest.mark.asyncio
+    async def test_no_tcp_connection(self):
+        """无 TCP 连接时不应抛出异常。"""
         orch = DistributedOrchestrator()
         node_info = StateNodeInfo(node_id=NodeId("w1"), ip="10.0.0.2", port=52415)
 
-        # 不应抛出异常
-        orch._stop_worker_rpc_server(NodeId("w1"), node_info)
+        await orch._stop_worker_rpc_server(NodeId("w1"), node_info)
 
-    @patch("httpx.post")
-    def test_timeout_error(self, mock_post):
-        """超时不应抛出异常。"""
-        mock_post.side_effect = httpx.TimeoutException("Timeout")
-        orch = DistributedOrchestrator()
-        node_info = StateNodeInfo(node_id=NodeId("w1"), ip="10.0.0.2", port=52415)
+    @pytest.mark.asyncio
+    async def test_send_failure(self):
+        """发送失败不应抛出异常。"""
+        mock_tcp = MagicMock()
 
-        orch._stop_worker_rpc_server(NodeId("w1"), node_info)
+        async def mock_send(conn_id, envelope):
+            return False
 
-    @patch("httpx.post")
-    def test_http_status_error(self, mock_post):
-        """HTTP 错误状态不应抛出异常。"""
-        mock_resp = MagicMock()
-        mock_resp.status_code = 500
-        mock_resp.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "Server Error", request=MagicMock(), response=mock_resp
+        mock_tcp.send = mock_send
+
+        orch = DistributedOrchestrator(
+            tcp_server=mock_tcp,
+            conn_node_map={"conn-1": "w1"},
         )
-        mock_post.return_value = mock_resp
-
-        orch = DistributedOrchestrator()
         node_info = StateNodeInfo(node_id=NodeId("w1"), ip="10.0.0.2", port=52415)
 
-        orch._stop_worker_rpc_server(NodeId("w1"), node_info)
+        await orch._stop_worker_rpc_server(NodeId("w1"), node_info)
 
-    @patch("httpx.post")
-    def test_successful_stop(self, mock_post):
+    @pytest.mark.asyncio
+    async def test_timeout(self):
+        """等待 ACK 超时不应抛出异常。"""
+        mock_tcp = MagicMock()
+
+        async def mock_send(conn_id, envelope):
+            # 不回复 ACK，模拟超时
+            return True
+
+        mock_tcp.send = mock_send
+
+        orch = DistributedOrchestrator(
+            tcp_server=mock_tcp,
+            conn_node_map={"conn-1": "w1"},
+        )
+        node_info = StateNodeInfo(node_id=NodeId("w1"), ip="10.0.0.2", port=52415)
+
+        await orch._stop_worker_rpc_server(NodeId("w1"), node_info)
+
+    @pytest.mark.asyncio
+    async def test_successful_stop(self):
         """成功停止应正常完成。"""
-        mock_resp = MagicMock()
-        mock_resp.raise_for_status = MagicMock()
-        mock_post.return_value = mock_resp
+        mock_tcp = MagicMock()
 
-        orch = DistributedOrchestrator()
+        async def mock_send(conn_id, envelope):
+            request_id = envelope.message.payload.get("request_id", "")
+            ack = Envelope(
+                channel=Channel.COMMANDS,
+                message=Message(
+                    type=MessageType.RPC_STOP_ACK,
+                    sender_id="w1",
+                    payload={"request_id": request_id, "status": "ok"},
+                ),
+            )
+            await orch.handle_rpc_stop_ack(ack)
+            return True
+
+        mock_tcp.send = mock_send
+
+        orch = DistributedOrchestrator(
+            tcp_server=mock_tcp,
+            conn_node_map={"conn-1": "w1"},
+        )
         node_info = StateNodeInfo(node_id=NodeId("w1"), ip="10.0.0.2", port=52415)
 
-        orch._stop_worker_rpc_server(NodeId("w1"), node_info)
-        mock_post.assert_called_once()
+        await orch._stop_worker_rpc_server(NodeId("w1"), node_info)
 
 
 class TestCreateLocalInstance:
@@ -446,3 +479,162 @@ class TestBuildTopology:
         topology = orch._build_topology(nodes, resources)
         assert topology.master_id == "master"
         assert len(topology.nodes) == 1
+
+
+class TestPipelineStrategy:
+    """Pipeline 并行策略测试。"""
+
+    def _make_orchestrator_with_mock_placement(self, selected_nodes):
+        """创建 mock 了放置决策的编排器。"""
+        orch = DistributedOrchestrator()
+        placement = PlacementResult(
+            success=True,
+            selected_nodes=selected_nodes,
+            strategy=PlacementStrategy.PIPELINE,
+            total_vram_free_mb=20000,
+        )
+        orch._placement = MagicMock()
+        orch._placement.place = MagicMock(return_value=placement)
+        return orch
+
+    @pytest.mark.asyncio
+    async def test_pipeline_strategy_uses_pipeline_planner(self):
+        """Pipeline 策略应使用 PipelinePlanner 进行层分配。"""
+        orch = self._make_orchestrator_with_mock_placement(["n1", "n2"])
+
+        nodes = {
+            NodeId("n1"): StateNodeInfo(node_id=NodeId("n1"), ip="10.0.0.1", port=52415),
+            NodeId("n2"): StateNodeInfo(node_id=NodeId("n2"), ip="10.0.0.2", port=52415),
+        }
+        resources = {
+            NodeId("n1"): _make_resources(8000),
+            NodeId("n2"): _make_resources(8000),
+        }
+
+        mock_engine = MagicMock()
+        mock_engine.close = MagicMock()
+
+        with patch.object(orch, "_start_llama_server", return_value=mock_engine):
+            result = await orch.create_instance(
+                instance_id=InstanceId("inst-1"),
+                model_id="llama-7b",
+                model_path="/models/llama.gguf",
+                model_vram_required_mb=16000,
+                nodes=nodes,
+                node_resources=resources,
+                strategy=PlacementStrategy.PIPELINE,
+            )
+
+        assert result.success is True
+        assert result.pipeline_plan is not None
+        assert result.pipeline_plan.is_valid is True
+        assert len(result.pipeline_plan.stages) == 2
+        assert result.tensor_split == []  # Pipeline 不使用 tensor-split
+        assert result.rpc_endpoints == []  # Pipeline 不使用 RPC
+
+    @pytest.mark.asyncio
+    async def test_pipeline_stages_cover_all_layers(self):
+        """Pipeline 阶段应覆盖所有层。"""
+        orch = self._make_orchestrator_with_mock_placement(["n1", "n2"])
+
+        nodes = {
+            NodeId("n1"): StateNodeInfo(node_id=NodeId("n1"), ip="10.0.0.1", port=52415),
+            NodeId("n2"): StateNodeInfo(node_id=NodeId("n2"), ip="10.0.0.2", port=52415),
+        }
+        resources = {
+            NodeId("n1"): _make_resources(8000),
+            NodeId("n2"): _make_resources(8000),
+        }
+
+        mock_engine = MagicMock()
+        mock_engine.close = MagicMock()
+
+        with patch.object(orch, "_start_llama_server", return_value=mock_engine):
+            result = await orch.create_instance(
+                instance_id=InstanceId("inst-1"),
+                model_id="llama-7b",
+                model_path="/models/llama.gguf",
+                model_vram_required_mb=16000,
+                nodes=nodes,
+                node_resources=resources,
+                strategy=PlacementStrategy.PIPELINE,
+            )
+
+        plan = result.pipeline_plan
+        assert plan.stages[0].start_layer == 0
+        assert plan.stages[-1].end_layer == 31  # total_layers=32
+        total_layers = sum(s.num_layers for s in plan.stages)
+        assert total_layers == 32
+
+    @pytest.mark.asyncio
+    async def test_pipeline_engine_failure_cleans_up(self):
+        """Pipeline 阶段启动失败时应清理已启动的引擎。"""
+        orch = self._make_orchestrator_with_mock_placement(["n1", "n2"])
+
+        nodes = {
+            NodeId("n1"): StateNodeInfo(node_id=NodeId("n1"), ip="10.0.0.1", port=52415),
+            NodeId("n2"): StateNodeInfo(node_id=NodeId("n2"), ip="10.0.0.2", port=52415),
+        }
+        resources = {
+            NodeId("n1"): _make_resources(8000),
+            NodeId("n2"): _make_resources(8000),
+        }
+
+        first_engine = MagicMock()
+        first_engine.close = MagicMock()
+        call_count = 0
+
+        async def mock_start(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return first_engine
+            raise RuntimeError("启动失败")
+
+        with patch.object(orch, "_start_llama_server", side_effect=mock_start):
+            result = await orch.create_instance(
+                instance_id=InstanceId("inst-1"),
+                model_id="llama-7b",
+                model_path="/models/llama.gguf",
+                model_vram_required_mb=16000,
+                nodes=nodes,
+                node_resources=resources,
+                strategy=PlacementStrategy.PIPELINE,
+            )
+
+        assert result.success is False
+        assert "启动失败" in result.error
+        first_engine.close.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_pipeline_engines_stored_with_stage_keys(self):
+        """Pipeline 引擎应使用 instance_id::node_id 格式的 key 存储。"""
+        orch = self._make_orchestrator_with_mock_placement(["n1", "n2"])
+
+        nodes = {
+            NodeId("n1"): StateNodeInfo(node_id=NodeId("n1"), ip="10.0.0.1", port=52415),
+            NodeId("n2"): StateNodeInfo(node_id=NodeId("n2"), ip="10.0.0.2", port=52415),
+        }
+        resources = {
+            NodeId("n1"): _make_resources(8000),
+            NodeId("n2"): _make_resources(8000),
+        }
+
+        mock_engine = MagicMock()
+        mock_engine.close = MagicMock()
+
+        with patch.object(orch, "_start_llama_server", return_value=mock_engine):
+            await orch.create_instance(
+                instance_id=InstanceId("inst-1"),
+                model_id="llama-7b",
+                model_path="/models/llama.gguf",
+                model_vram_required_mb=16000,
+                nodes=nodes,
+                node_resources=resources,
+                strategy=PlacementStrategy.PIPELINE,
+            )
+
+        # 应有 2 个引擎（n1 和 n2 各一个）
+        assert len(orch._engines) == 2
+        keys = list(orch._engines.keys())
+        assert all("inst-1::" in str(k) for k in keys)

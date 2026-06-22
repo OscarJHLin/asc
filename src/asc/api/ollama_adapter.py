@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from typing import Any
 
 from asc.api.prompt_converter import convert_messages_to_prompt
 
@@ -24,7 +25,7 @@ class OllamaGenerateRequest:
     model: str
     prompt: str
     stream: bool = False
-    options: dict = field(default_factory=dict)
+    options: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -38,7 +39,7 @@ class OllamaGenerateResponse:
     eval_count: int = 0
     created_at: str = field(default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%S.000000Z"))
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "model": self.model,
             "created_at": self.created_at,
@@ -54,9 +55,9 @@ class OllamaChatRequest:
     """Ollama Chat 请求。"""
 
     model: str
-    messages: list[dict]
+    messages: list[dict[str, Any]]
     stream: bool = False
-    options: dict = field(default_factory=dict)
+    options: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -70,7 +71,7 @@ class OllamaChatResponse:
     eval_count: int = 0
     created_at: str = field(default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%S.000000Z"))
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "model": self.model,
             "created_at": self.created_at,
@@ -90,18 +91,13 @@ class OllamaModelInfo:
     modified_at: str = ""
     digest: str = ""
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "size": self.size,
             "modified_at": self.modified_at,
             "digest": self.digest,
         }
-
-
-def _messages_to_prompt(messages: list[dict]) -> str:
-    """将 Ollama chat messages 转换为 llama.cpp prompt。"""
-    return convert_messages_to_prompt(messages)
 
 
 class OllamaAdapter:
@@ -120,7 +116,7 @@ class OllamaAdapter:
 
     def format_prompt_from_chat(self, request: OllamaChatRequest) -> str:
         """将 Chat 请求格式化为 prompt。"""
-        return _messages_to_prompt(request.messages)
+        return convert_messages_to_prompt(request.messages)
 
     def create_generate_response(
         self,

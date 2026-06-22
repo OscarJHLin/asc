@@ -25,7 +25,7 @@ from __future__ import annotations
 import enum
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Generator
+from typing import AsyncGenerator, Generator
 
 # --- 值对象 ---
 
@@ -125,3 +125,15 @@ class Engine(ABC):
     def status(self) -> EngineStatus:
         """返回当前引擎状态。"""
         ...
+
+    async def submit_async_stream(self, request: InferenceRequest) -> AsyncGenerator[str, None]:
+        """异步流式推理，逐 token yield 生成内容。
+
+        默认实现抛出 NotImplementedError，子类可覆盖以提供流式推理能力。
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} 未实现 submit_async_stream，"
+            "请使用非流式 submit() 方法或实现此方法"
+        )
+        # 使此方法成为异步生成器（yield 不可达，但确保类型正确）
+        yield ""  # noqa: unreachable

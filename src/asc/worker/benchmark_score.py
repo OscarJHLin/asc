@@ -1,7 +1,7 @@
 """BenchmarkScore 标准化性能测试模块。
 
 基于小参数大语言模型的节点性能测试方案：
-- 使用统一轻量级基准模型（如 Qwen2.5-1.5B-Instruct Q4_K_M）
+- 使用统一轻量级基准模型（如 Qwen2.5-0.5B-Instruct Q4_K_M）
 - 标准测试问题集覆盖不同复杂度
 - 精确测量 TPS（tokens/秒）并计算相对性能评分
 - 支持评分缓存，避免重复测试
@@ -129,9 +129,32 @@ class BenchmarkScore:
     DEFAULT_STANDARD_SCORE: float = 50.0
 
     # 默认基准模型配置
-    DEFAULT_MODEL_NAME: str = "Qwen2.5-1.5B-Instruct"
-    DEFAULT_QUANTIZATION: str = "Q4_K_M"
-    DEFAULT_CONTEXT_LENGTH: int = 4096
+    DEFAULT_CONTEXT_LENGTH: int = 8192
+
+    # 基准模型候选列表（按优先级排列，第一个找到的即为基准模型）
+    _BENCHMARK_MODEL_CANDIDATES: list[str] = [
+        "gemma-4-E2B-it-UD-Q2_K_XL.gguf",
+        "qwen2.5-0.5b-instruct-q4_k_m.gguf",
+        "Qwen2.5-0.5B-Instruct-Q4_K_M.gguf",
+    ]
+
+    # 默认模型名和量化方式（向后兼容，用于测试等场景）
+    DEFAULT_MODEL_NAME: str = "Gemma-4-E2B-it-UD-Q2_K_XL"
+    DEFAULT_QUANTIZATION: str = "UD-Q2_K_XL"
+
+    # 模型文件名到模型名的映射
+    _MODEL_NAME_MAP: dict[str, str] = {
+        "gemma-4-E2B-it-UD-Q2_K_XL.gguf": "Gemma-4-E2B-it-UD-Q2_K_XL",
+        "qwen2.5-0.5b-instruct-q4_k_m.gguf": "Qwen2.5-0.5B-Instruct",
+        "Qwen2.5-0.5B-Instruct-Q4_K_M.gguf": "Qwen2.5-0.5B-Instruct",
+    }
+
+    # 模型文件名到量化方式的映射
+    _MODEL_QUANT_MAP: dict[str, str] = {
+        "gemma-4-E2B-it-UD-Q2_K_XL.gguf": "UD-Q2_K_XL",
+        "qwen2.5-0.5b-instruct-q4_k_m.gguf": "Q4_K_M",
+        "Qwen2.5-0.5B-Instruct-Q4_K_M.gguf": "Q4_K_M",
+    }
 
     def __init__(
         self,
@@ -156,6 +179,8 @@ class BenchmarkScore:
         """
         self.node_id = node_id
         self.model_path = model_path or self._find_default_model()
+        self._model_name = self._infer_model_name()
+        self._quantization = self._infer_quantization()
         self.questions_path = questions_path or self._default_questions_path()
         self.cache_path = cache_path or self._default_cache_path()
         self.llama_server_port = llama_server_port
@@ -201,8 +226,8 @@ class BenchmarkScore:
                 timestamp=time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime()),
                 node_id=self.node_id,
                 node_hardware_summary=self._get_hardware_summary(),
-                model_name=self.DEFAULT_MODEL_NAME,
-                quantization=self.DEFAULT_QUANTIZATION,
+                model_name=self._model_name,
+                quantization=self._quantization,
                 question_results=results,
                 avg_elapsed_ms=avg_elapsed,
                 avg_tps=avg_tps,
@@ -259,7 +284,11 @@ class BenchmarkScore:
     # ------------------------------------------------------------------
 
     def _deploy_benchmark_model(self) -> None:
-        """在节点上启动 llama-server 加载基准模型。"""
+        """在节点上启动 llama-server 加载基准模型。
+
+        优先使用独立的 llama-server 可执行文件，
+        若不存在则回退到 llama-cpp-python 的 Python API。
+        """
         if self._process is not None and self._process.poll() is None:
             # 已有运行中的 server，复用
             return
@@ -268,20 +297,95 @@ class BenchmarkScore:
             raise FileNotFoundError(f"基准模型文件不存在: {self.model_path}")
 
         exe = self._find_llama_server()
-        if exe is None:
-            raise FileNotFoundError("未找到 llama-server 可执行文件")
+        if exe is not None:
+            cmd = [
+                exe,
+                "-m", self.model_path,
+                "--host", "127.0.0.1",
+                "--port", str(self.llama_server_port),
+                "-ngl", "-1",  # 全部加载到 GPU（若可用），CPU 节点会自动回退
+                "-c", str(self.DEFAULT_CONTEXT_LENGTH),
+            ]
 
-        cmd = [
-            exe,
-            "-m", self.model_path,
-            "--host", "127.0.0.1",
-            "--port", str(self.llama_server_port),
-            "-ngl", "-1",  # 全部加载到 GPU（若可用），CPU 节点会自动回退
-            "-c", str(self.DEFAULT_CONTEXT_LENGTH),
-        ]
+            # 多 GPU 环境：使用单设备模式避免 GGML_SCHED_MAX_SPLIT_INPUTS 崩溃
+            # 当检测到多个 GPU 时，-ngl -1 会让 llama.cpp 将模型分割到多个 GPU，
+            # 可能触发 GGML_ASSERT(n_inputs < GGML_SCHED_MAX_SPLIT_INPUTS)。
+            # 解决方案：使用 -sm none --device CUDA0 只用一个 GPU 运行基准测试。
+            gpu_count = len(self._hardware_detector.detect_gpus())
+            if gpu_count > 1:
+                cmd.extend(["-sm", "none", "--device", "CUDA0"])
 
+            self._process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            self._wait_for_ready()
+        else:
+            # 回退：使用 llama-cpp-python 启动 HTTP server
+            self._start_python_server()
+
+    def _start_python_server(self) -> None:
+        """使用 llama-cpp-python 直接加载模型并启动 HTTP server。
+
+        使用 llama-cpp-python 的 Llama 类加载模型，
+        然后通过 uvicorn 暴露 OpenAI 兼容 API。
+        """
+        try:
+            from llama_cpp import Llama
+        except ImportError:
+            raise FileNotFoundError(
+                "未找到 llama-server 可执行文件，也未安装 llama-cpp-python。"
+                "请安装 llama.cpp 或运行: pip install llama-cpp-python"
+            )
+
+        # 在子进程中启动 llama-cpp-python server
+        import sys
+
+        server_script = f"""
+import sys
+import os
+os.environ['LLAMA_ARG_N_CTX'] = '{self.DEFAULT_CONTEXT_LENGTH}'
+from llama_cpp import Llama
+llm = Llama(model_path={repr(self.model_path)}, n_ctx={self.DEFAULT_CONTEXT_LENGTH}, n_gpu_layers=-1, verbose=False)
+
+from fastapi import FastAPI
+from fastapi.responses import JSONResponse
+import uvicorn
+import json
+import time
+
+app = FastAPI()
+
+@app.get('/health')
+async def health():
+    return {{'status': 'ok'}}
+
+@app.post('/v1/chat/completions')
+async def chat_completions(request: dict):
+    messages = request.get('messages', [])
+    prompt = ''
+    for m in messages:
+        prompt += m.get('content', '') + '\\n'
+    max_tokens = request.get('max_tokens', 128)
+    temperature = request.get('temperature', 0.7)
+
+    start = time.perf_counter()
+    result = llm(prompt, max_tokens=max_tokens, temperature=temperature, echo=False)
+    elapsed = (time.perf_counter() - start) * 1000
+
+    text = result['choices'][0]['text'] if result.get('choices') else ''
+    usage = result.get('usage', {{}})
+    return JSONResponse({{
+        'choices': [{{'message': {{'content': text}}, 'index': 0}}],
+        'usage': usage,
+    }})
+
+uvicorn.run(app, host='127.0.0.1', port={self.llama_server_port})
+"""
         self._process = subprocess.Popen(
-            cmd,
+            [sys.executable, "-c", server_script],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -396,7 +500,7 @@ class BenchmarkScore:
             # 简单校验：node_id 和模型名匹配
             if data.get("node_id") != self.node_id:
                 return None
-            if data.get("model_name") != self.DEFAULT_MODEL_NAME:
+            if data.get("model_name") != self._model_name:
                 return None
             # 重建 report（简化版，不重建完整 QuestionResult 列表）
             return BenchmarkReport(
@@ -404,7 +508,7 @@ class BenchmarkScore:
                 node_id=data["node_id"],
                 node_hardware_summary=data.get("node_hardware_summary", {}),
                 model_name=data["model_name"],
-                quantization=data.get("quantization", self.DEFAULT_QUANTIZATION),
+                quantization=data.get("quantization", self._quantization),
                 question_results=[],
                 avg_elapsed_ms=data.get("avg_elapsed_ms", 0.0),
                 avg_tps=data.get("avg_tps", 0.0),
@@ -460,16 +564,48 @@ class BenchmarkScore:
         return str(result) if result is not None else None
 
     def _find_default_model(self) -> str:
-        """查找默认基准模型路径。"""
-        models_dir = Path(os.getenv("ASC_MODELS_PATH", "./models"))
-        candidates = [
-            models_dir / "qwen2.5-1.5b-instruct-q4_k_m.gguf",
-            models_dir / "Qwen2.5-1.5B-Instruct-Q4_K_M.gguf",
+        """查找默认基准模型路径。
+
+        优先级：
+        1. ASC_BENCHMARK_MODEL 环境变量（完整文件路径）
+        2. ASC_MODELS_PATH 目录下的候选模型文件
+        3. 项目根目录下的 models/ 目录
+        4. 当前工作目录下的 ./models 目录
+        """
+        # 环境变量指定完整路径
+        env_model = os.getenv("ASC_BENCHMARK_MODEL")
+        if env_model and Path(env_model).exists():
+            return str(Path(env_model).resolve())
+
+        # 候选 models 目录列表
+        project_root = Path(__file__).resolve().parent.parent.parent  # asc/src/asc/worker -> asc/
+        candidate_dirs = [
+            Path(os.getenv("ASC_MODELS_PATH", "")) if os.getenv("ASC_MODELS_PATH") else None,
+            project_root / "models",
+            Path("./models"),
         ]
-        for path in candidates:
-            if path.exists():
-                return str(path.resolve())
-        return str(candidates[0])
+
+        for models_dir in candidate_dirs:
+            if models_dir is None:
+                continue
+            for candidate in self._BENCHMARK_MODEL_CANDIDATES:
+                path = models_dir / candidate
+                if path.exists():
+                    return str(path.resolve())
+
+        # 未找到任何模型，返回项目根目录下第一个候选的预期路径（会触发 FileNotFoundError）
+        fallback_dir = project_root / "models"
+        return str((fallback_dir / self._BENCHMARK_MODEL_CANDIDATES[0]).resolve())
+
+    def _infer_model_name(self) -> str:
+        """根据模型文件路径推断模型名称。"""
+        filename = Path(self.model_path).name
+        return self._MODEL_NAME_MAP.get(filename, Path(self.model_path).stem)
+
+    def _infer_quantization(self) -> str:
+        """根据模型文件路径推断量化方式。"""
+        filename = Path(self.model_path).name
+        return self._MODEL_QUANT_MAP.get(filename, "unknown")
 
     def _default_questions_path(self) -> str:
         """默认测试问题文件路径。"""

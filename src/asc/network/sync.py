@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from asc.api.auth import validate_model_id as _validate_model_id_bool
+
 CHUNK_SIZE: int = 10 * 1024 * 1024  # 10MB
 
 
@@ -25,11 +27,8 @@ def _validate_model_id(model_id: str) -> None:
     Raises:
         ValueError: model_id 包含路径遍历字符
     """
-    if not model_id:
-        raise ValueError("model_id 不能为空")
-    for char in ["..", "/", "\\", "\x00"]:
-        if char in model_id:
-            raise ValueError(f"model_id 包含非法字符: {char!r}")
+    if not _validate_model_id_bool(model_id):
+        raise ValueError(f"model_id 包含非法字符: {model_id!r}")
 
 
 def _safe_model_path(models_dir: Path, model_id: str) -> Path:
@@ -313,11 +312,18 @@ class ReceiveState:
         self._completed: set[int] = set()
         self._received_bytes: int = 0
 
-        # 预分配文件
+        # 预分配文件（保留已有数据以支持断点续传）
         file_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(file_path, "wb") as f:
-            f.seek(total_bytes - 1)
-            f.write(b"\x00")
+        if not file_path.exists():
+            # 新文件：预分配空间
+            with open(file_path, "wb") as f:
+                f.seek(total_bytes - 1)
+                f.write(b"\x00")
+        elif file_path.stat().st_size < total_bytes:
+            # 已有文件但不够大：扩展到目标大小
+            with open(file_path, "r+b") as f:
+                f.seek(total_bytes - 1)
+                f.write(b"\x00")
 
     @property
     def is_complete(self) -> bool:

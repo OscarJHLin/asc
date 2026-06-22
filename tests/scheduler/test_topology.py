@@ -1,11 +1,11 @@
 """测试集群拓扑构建模块。"""
 
-from asc.scheduler.topology import ClusterTopology, NodeInfo, build_topology
+from asc.scheduler.topology import ClusterTopology, TopologyNode, build_topology
 from asc.worker.agent import NodeResources
 
 
-class TestNodeInfo:
-    """NodeInfo 数据类测试。"""
+class TestTopologyNode:
+    """TopologyNode 数据类测试。"""
 
     def test_fields(self):
         res = NodeResources(
@@ -14,7 +14,7 @@ class TestNodeInfo:
             memory_total_mb=32000,
             memory_free_mb=16000,
         )
-        node = NodeInfo(
+        node = TopologyNode(
             node_id="n1",
             is_local=True,
             address="127.0.0.1:8080",
@@ -66,13 +66,13 @@ class TestClusterTopology:
         topo = ClusterTopology(
             master_id="m1",
             nodes={
-                "m1": NodeInfo(
+                "m1": TopologyNode(
                     node_id="m1",
                     is_local=True,
                     address="127.0.0.1",
                     resources=res1,
                 ),
-                "w1": NodeInfo(
+                "w1": TopologyNode(
                     node_id="w1",
                     is_local=False,
                     address="10.0.0.2",
@@ -87,13 +87,13 @@ class TestClusterTopology:
         topo = ClusterTopology(
             master_id="m1",
             nodes={
-                "m1": NodeInfo(
+                "m1": TopologyNode(
                     node_id="m1", is_local=True, address=None, resources=res
                 ),
-                "w1": NodeInfo(
+                "w1": TopologyNode(
                     node_id="w1", is_local=False, address="10.0.0.2", resources=res
                 ),
-                "w2": NodeInfo(
+                "w2": TopologyNode(
                     node_id="w2", is_local=False, address="10.0.0.3", resources=res
                 ),
             },
@@ -106,7 +106,7 @@ class TestClusterTopology:
         topo = ClusterTopology(
             master_id="m1",
             nodes={
-                "m1": NodeInfo(
+                "m1": TopologyNode(
                     node_id="m1", is_local=True, address=None, resources=self._make_resources()
                 ),
             },

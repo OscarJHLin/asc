@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
 
-from asc.api.auth import require_api_key
+from asc.api.auth import _init_default_store, require_api_key
 from asc.api.server import create_app
 
 
@@ -16,13 +16,15 @@ class TestAuthMiddleware:
         """S-02/S-03: 未配置 API Key 时拒绝请求。"""
         os.environ.pop("ASC_API_KEY", None)
         os.environ.pop("ASC_ALLOW_NO_AUTH", None)
+        _init_default_store()
         assert require_api_key(api_key=None) is False
 
-    def test_no_key_with_allow_no_auth(self):
-        """ASC_ALLOW_NO_AUTH=1 时允许免认证。"""
+    def test_no_key_with_allow_no_auth_allows(self):
+        """ASC_ALLOW_NO_AUTH=1 允许免认证访问（仅用于开发/测试环境）。"""
         os.environ.pop("ASC_API_KEY", None)
         os.environ["ASC_ALLOW_NO_AUTH"] = "1"
         try:
+            _init_default_store()
             assert require_api_key(api_key=None) is True
         finally:
             del os.environ["ASC_ALLOW_NO_AUTH"]
@@ -31,6 +33,7 @@ class TestAuthMiddleware:
         """正确的 API Key 通过。"""
         os.environ["ASC_API_KEY"] = "test-key-123"
         try:
+            _init_default_store()
             assert require_api_key(api_key="test-key-123") is True
         finally:
             del os.environ["ASC_API_KEY"]
@@ -39,6 +42,7 @@ class TestAuthMiddleware:
         """错误的 API Key 被拒绝。"""
         os.environ["ASC_API_KEY"] = "correct-key"
         try:
+            _init_default_store()
             assert require_api_key(api_key="wrong-key") is False
         finally:
             del os.environ["ASC_API_KEY"]
@@ -47,6 +51,7 @@ class TestAuthMiddleware:
         """需要 key 但未提供时被拒绝。"""
         os.environ["ASC_API_KEY"] = "required-key"
         try:
+            _init_default_store()
             assert require_api_key(api_key=None) is False
         finally:
             del os.environ["ASC_API_KEY"]
@@ -57,9 +62,10 @@ class TestFastAPIApp:
 
     def _make_client_with_auth(self, **kwargs):
         """创建带认证的测试客户端。"""
-        os.environ["ASC_ALLOW_NO_AUTH"] = "1"
+        os.environ["ASC_API_KEY"] = "test-key"
+        _init_default_store()
         app = create_app(**kwargs)
-        client = TestClient(app)
+        client = TestClient(app, headers={"X-API-Key": "test-key"})
         return client
 
     def test_create_app(self):
@@ -78,11 +84,20 @@ class TestFastAPIApp:
     def test_openai_models_endpoint(self):
         app = create_app(model_mappings={"llama-3.1-8b": "/models/llama.gguf"})
         client = TestClient(app)
+        # /v1/models 现在需要认证
         resp = client.get("/v1/models")
-        assert resp.status_code == 200
-        data = resp.json()
+        assert resp.status_code == 403
+        # 带认证的请求应返回 200
+        os.environ["ASC_API_KEY"] = "test-key"
+        _init_default_store()
+        app2 = create_app(model_mappings={"llama-3.1-8b": "/models/llama.gguf"})
+        client2 = TestClient(app2)
+        resp2 = client2.get("/v1/models", headers={"X-API-Key": "test-key"})
+        assert resp2.status_code == 200
+        data = resp2.json()
         assert data["object"] == "list"
         assert len(data["data"]) == 1
+        del os.environ["ASC_API_KEY"]
 
     def test_openai_chat_completions_endpoint(self):
         """Chat completions 端点存在（不测试实际推理）。"""
@@ -97,56 +112,64 @@ class TestFastAPIApp:
         assert resp.status_code in (200, 503)
 
     def test_admin_nodes_endpoint(self):
-        """S-05: 管理端点需要管理员认证。"""
+        """S-05: 管理端点需要管理员认证（RBAC）。"""
         # 无认证时应返回 403（管理端点需要管理员权限）
         os.environ.pop("ASC_API_KEY", None)
         os.environ.pop("ASC_ALLOW_NO_AUTH", None)
         os.environ.pop("ASC_ADMIN_API_KEY", None)
+        _init_default_store()
         app = create_app()
         client = TestClient(app)
         resp = client.get("/admin/nodes")
         assert resp.status_code == 403
 
-        # 有普通 API Key 但无管理员 Key 时，回退到普通 Key 验证（兼容模式）
+        # 有普通 API Key 但无管理员 Key 时，RBAC 拒绝访问
         os.environ["ASC_API_KEY"] = "test-key"
         try:
+            _init_default_store()
             app = create_app()
             client = TestClient(app)
             resp = client.get("/admin/nodes", headers={"X-API-Key": "test-key"})
-            assert resp.status_code == 200
+            assert resp.status_code == 403
         finally:
             del os.environ["ASC_API_KEY"]
 
         # 有管理员 Key 时，使用管理员 Key 验证
+        os.environ["ASC_API_KEY"] = "test-key"
         os.environ["ASC_ADMIN_API_KEY"] = "admin-key"
         try:
+            _init_default_store()
             app = create_app()
             client = TestClient(app)
             # 普通 Key 被拒绝
-            resp = client.get("/admin/nodes", headers={"X-API-Key": "wrong-key"})
+            resp = client.get("/admin/nodes", headers={"X-API-Key": "test-key"})
             assert resp.status_code == 403
             # 管理员 Key 通过
             resp = client.get("/admin/nodes", headers={"X-API-Key": "admin-key"})
             assert resp.status_code == 200
         finally:
+            del os.environ["ASC_API_KEY"]
             del os.environ["ASC_ADMIN_API_KEY"]
 
     def test_admin_config_endpoint(self):
-        """S-05: 管理端点需要管理员认证。"""
+        """S-05: 管理端点需要管理员认证（RBAC）。"""
         os.environ.pop("ASC_API_KEY", None)
         os.environ.pop("ASC_ALLOW_NO_AUTH", None)
         os.environ.pop("ASC_ADMIN_API_KEY", None)
+        _init_default_store()
         app = create_app()
         client = TestClient(app)
         resp = client.get("/admin/config")
         assert resp.status_code == 403
 
+        # 普通 API Key 不能访问 admin 端点
         os.environ["ASC_API_KEY"] = "test-key"
         try:
+            _init_default_store()
             app = create_app()
             client = TestClient(app)
             resp = client.get("/admin/config", headers={"X-API-Key": "test-key"})
-            assert resp.status_code == 200
+            assert resp.status_code == 403
         finally:
             del os.environ["ASC_API_KEY"]
 
@@ -223,6 +246,7 @@ class TestFastAPIApp:
         """配置 API Key 后未提供 Key 应返回 401。"""
         os.environ["ASC_API_KEY"] = "secret-key"
         try:
+            _init_default_store()
             app = create_app(model_mappings={"m": "/m.gguf"})
             client = TestClient(app)
             resp = client.post(
@@ -240,6 +264,7 @@ class TestFastAPIApp:
         """提供正确的 API Key 应通过认证。"""
         os.environ["ASC_API_KEY"] = "secret-key"
         try:
+            _init_default_store()
             app = create_app(model_mappings={"m": "/m.gguf"})
             client = TestClient(app)
             resp = client.post(
@@ -256,10 +281,11 @@ class TestFastAPIApp:
             del os.environ["ASC_API_KEY"]
 
     def test_no_auth_env_allows_requests(self):
-        """ASC_ALLOW_NO_AUTH=1 允许无认证请求。"""
+        """ASC_ALLOW_NO_AUTH=1 允许无认证请求（仅用于开发/测试环境）。"""
         os.environ.pop("ASC_API_KEY", None)
         os.environ["ASC_ALLOW_NO_AUTH"] = "1"
         try:
+            _init_default_store()
             app = create_app(model_mappings={"m": "/m.gguf"})
             client = TestClient(app)
             resp = client.post(
@@ -269,6 +295,101 @@ class TestFastAPIApp:
                     "messages": [{"role": "user", "content": "Hi"}],
                 },
             )
-            assert resp.status_code in (200, 503)
+            # ASC_ALLOW_NO_AUTH=1 时不会因认证被拒绝
+            # 但可能因无引擎而 503，不会是 401
+            assert resp.status_code != 401
         finally:
             del os.environ["ASC_ALLOW_NO_AUTH"]
+
+
+class TestMetricsEndpoint:
+    """Prometheus /metrics 端点测试。"""
+
+    def _make_client_with_auth(self, **kwargs):
+        """创建带认证的测试客户端。"""
+        os.environ["ASC_API_KEY"] = "test-key"
+        _init_default_store()
+        app = create_app(**kwargs)
+        client = TestClient(app)
+        return client
+
+    def test_metrics_endpoint_returns_200(self):
+        """GET /metrics 带认证返回 200。"""
+        client = self._make_client_with_auth()
+        resp = client.get("/metrics", headers={"X-API-Key": "test-key"})
+        assert resp.status_code == 200
+        del os.environ["ASC_API_KEY"]
+
+    def test_metrics_content_type(self):
+        """响应 Content-Type 为 Prometheus 文本格式。"""
+        client = self._make_client_with_auth()
+        resp = client.get("/metrics", headers={"X-API-Key": "test-key"})
+        assert "text/plain" in resp.headers["content-type"]
+        del os.environ["ASC_API_KEY"]
+
+    def test_metrics_empty_collector(self):
+        """空 collector 返回空字符串。"""
+        from asc.core.monitoring import MetricsCollector
+
+        collector = MetricsCollector()
+        client = self._make_client_with_auth(metrics_collector=collector)
+        resp = client.get("/metrics", headers={"X-API-Key": "test-key"})
+        assert resp.status_code == 200
+        # 空 collector 导出为空字符串
+        assert resp.text.strip() == ""
+        del os.environ["ASC_API_KEY"]
+
+    def test_metrics_with_counter(self):
+        """包含 Counter 指标的 Prometheus 格式。"""
+        from asc.core.monitoring import MetricsCollector
+
+        collector = MetricsCollector()
+        collector.counter("requests_total", "总请求数").inc(5)
+        client = self._make_client_with_auth(metrics_collector=collector)
+        resp = client.get("/metrics", headers={"X-API-Key": "test-key"})
+        text = resp.text
+        assert "# HELP requests_total 总请求数" in text
+        assert "# TYPE requests_total counter" in text
+        assert "requests_total 5" in text
+        del os.environ["ASC_API_KEY"]
+
+    def test_metrics_with_gauge(self):
+        """包含 Gauge 指标的 Prometheus 格式。"""
+        from asc.core.monitoring import MetricsCollector
+
+        collector = MetricsCollector()
+        collector.gauge("nodes_online", "在线节点数").set(3)
+        client = self._make_client_with_auth(metrics_collector=collector)
+        resp = client.get("/metrics", headers={"X-API-Key": "test-key"})
+        text = resp.text
+        assert "# HELP nodes_online 在线节点数" in text
+        assert "# TYPE nodes_online gauge" in text
+        assert "nodes_online 3" in text
+        del os.environ["ASC_API_KEY"]
+
+    def test_metrics_with_histogram(self):
+        """包含 Histogram 指标的 Prometheus 格式。"""
+        from asc.core.monitoring import MetricsCollector
+
+        collector = MetricsCollector()
+        h = collector.histogram("request_latency_ms", "请求延迟")
+        h.observe(45.2)
+        h.observe(120.0)
+        client = self._make_client_with_auth(metrics_collector=collector)
+        resp = client.get("/metrics", headers={"X-API-Key": "test-key"})
+        text = resp.text
+        assert "# HELP request_latency_ms 请求延迟" in text
+        assert "# TYPE request_latency_ms histogram" in text
+        assert "request_latency_ms_count 2" in text
+        assert "request_latency_ms_sum" in text
+        del os.environ["ASC_API_KEY"]
+
+    def test_metrics_requires_auth(self):
+        """Prometheus /metrics 端点现在需要认证。"""
+        os.environ.pop("ASC_API_KEY", None)
+        os.environ.pop("ASC_ALLOW_NO_AUTH", None)
+        _init_default_store()
+        app = create_app()
+        client = TestClient(app)
+        resp = client.get("/metrics")
+        assert resp.status_code == 403

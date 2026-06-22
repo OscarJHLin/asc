@@ -2,9 +2,9 @@
   "version": "1.0.0",
   "description": "ASC 标准化性能测试问题集，覆盖不同复杂度场景",
   "model_config": {
-    "recommended_model": "Qwen2.5-1.5B-Instruct",
+    "recommended_model": "Qwen2.5-0.5B-Instruct",
     "quantization": "Q4_K_M",
-    "context_length": 4096,
+    "context_length": 8192,
     "expected_output_tokens": {
       "min": 50,
       "max": 300

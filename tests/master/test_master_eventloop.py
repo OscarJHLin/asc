@@ -103,11 +103,11 @@ class TestHandleNodeJoined:
 
         envelope = _make_envelope(
             msg_type=MessageType.NODE_JOINED,
-            sender_id="conn-1",
+            sender_id="worker-1",
             payload={"node_id": "worker-1", "ip": "10.0.0.2", "port": 52415},
             channel=Channel.DISCOVERY,
         )
-        await master._handle_node_joined(envelope)
+        await master._handle_node_joined(envelope, conn_id="conn-1")
 
         assert NodeId("worker-1") in master.state.nodes
         node_info = master.state.nodes[NodeId("worker-1")]
@@ -121,11 +121,11 @@ class TestHandleNodeJoined:
 
         envelope = _make_envelope(
             msg_type=MessageType.NODE_JOINED,
-            sender_id="conn-1",
+            sender_id="worker-1",
             payload={"node_id": "worker-1", "ip": "10.0.0.2", "port": 52415},
             channel=Channel.DISCOVERY,
         )
-        await master._handle_node_joined(envelope)
+        await master._handle_node_joined(envelope, conn_id="conn-1")
 
         assert "worker-1" in detector._heartbeats
 
@@ -136,25 +136,25 @@ class TestHandleNodeJoined:
 
         envelope = _make_envelope(
             msg_type=MessageType.NODE_JOINED,
-            sender_id="conn-1",
+            sender_id="worker-1",
             payload={"node_id": "worker-1", "ip": "10.0.0.2", "port": 52415},
             channel=Channel.DISCOVERY,
         )
-        await master._handle_node_joined(envelope)
+        await master._handle_node_joined(envelope, conn_id="conn-1")
 
         assert "worker-1" in lb._active_requests
 
     async def test_node_joined_updates_conn_map(self):
-        """节点注册后，连接映射应更新。"""
+        """节点注册后，连接映射应更新（conn_id -> node_id）。"""
         master = MasterNode(node_id="master")
 
         envelope = _make_envelope(
             msg_type=MessageType.NODE_JOINED,
-            sender_id="conn-1",
+            sender_id="worker-1",
             payload={"node_id": "worker-1", "ip": "10.0.0.2", "port": 52415},
             channel=Channel.DISCOVERY,
         )
-        await master._handle_node_joined(envelope)
+        await master._handle_node_joined(envelope, conn_id="conn-1")
 
         assert master._conn_node_map["conn-1"] == "worker-1"
 

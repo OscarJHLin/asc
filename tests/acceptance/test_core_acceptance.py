@@ -1,6 +1,6 @@
 """ASC 验收测试 - 核心模块
 
-测试范围：core/config.py, core/election.py, core/event_log.py, core/model_manager.py
+测试范围：core/config.py, core/election.py, core/event_log.py
 测试维度：功能测试、边界条件测试、异常场景测试
 """
 
@@ -18,7 +18,6 @@ from asc.core.event_log import (
     deserialize_indexed_event,
     serialize_indexed_event,
 )
-from asc.core.model_manager import DownloadProgress, ModelManager
 from asc.types.common import InstanceId, NodeId, TaskId
 from asc.types.events import (
     IndexedEvent,
@@ -615,163 +614,71 @@ class TestEventLogBoundary:
 
 
 # ======================================================================
-# 4. core/model_manager.py 测试
+# 4. 选举协议桥接测试
 # ======================================================================
 
 
-class TestModelManagerBasic:
-    """ModelManager 基本功能测试。"""
+class TestElectionProtocolBridge:
+    """选举消息与 Envelope 桥接测试。"""
 
-    def test_register_model(self, tmp_path):
-        mm = ModelManager(tmp_path / "models")
-        mm.register("llama-7b", "/path/to/llama-7b.gguf")
-        assert mm.resolve("llama-7b") == "/path/to/llama-7b.gguf"
+    def test_election_to_envelope(self):
+        """ElectionMessage.ELECTION 转换为 Envelope。"""
+        from asc.core.election import ElectionMessage, ElectionMessageType, election_to_envelope
 
-    def test_unregister_model(self, tmp_path):
-        mm = ModelManager(tmp_path / "models")
-        mm.register("llama-7b", "/path/to/llama-7b.gguf")
-        mm.unregister("llama-7b")
-        assert mm.resolve("llama-7b") is None
+        msg = ElectionMessage(type=ElectionMessageType.ELECTION, sender_id="n1", election_clock=3)
+        env = election_to_envelope(msg, target="n2")
 
-    def test_unregister_nonexistent(self, tmp_path):
-        """注销不存在的模型不报错。"""
-        mm = ModelManager(tmp_path / "models")
-        mm.unregister("nonexistent")
+        assert env.channel.value == "election"
+        assert env.message.type.value == "election"
+        assert env.message.sender_id == "n1"
+        assert env.message.payload["election_clock"] == 3
+        assert env.target == "n2"
 
-    def test_resolve_nonexistent(self, tmp_path):
-        mm = ModelManager(tmp_path / "models")
-        assert mm.resolve("nonexistent") is None
+    def test_alive_to_envelope(self):
+        """ElectionMessage.ALIVE 转换为 Envelope。"""
+        from asc.core.election import ElectionMessage, ElectionMessageType, election_to_envelope
 
-    def test_list_models_empty(self, tmp_path):
-        mm = ModelManager(tmp_path / "models")
-        assert mm.list_models() == []
+        msg = ElectionMessage(type=ElectionMessageType.ALIVE, sender_id="n2", election_clock=3)
+        env = election_to_envelope(msg)
 
-    def test_list_models(self, tmp_path):
-        mm = ModelManager(tmp_path / "models")
-        mm.register("m1", "/p1")
-        mm.register("m2", "/p2")
-        models = mm.list_models()
-        assert len(models) == 2
+        assert env.message.type.value == "election_alive"
+        assert env.target is None
 
-    def test_register_overwrite(self, tmp_path):
-        """重复注册同名模型会覆盖。"""
-        mm = ModelManager(tmp_path / "models")
-        mm.register("m1", "/old")
-        mm.register("m1", "/new")
-        assert mm.resolve("m1") == "/new"
+    def test_coordinator_to_envelope(self):
+        """ElectionMessage.COORDINATOR 转换为 Envelope。"""
+        from asc.core.election import ElectionMessage, ElectionMessageType, election_to_envelope
 
+        msg = ElectionMessage(type=ElectionMessageType.COORDINATOR, sender_id="n3", election_clock=5)
+        env = election_to_envelope(msg)
 
-class TestModelManagerAutoDiscover:
-    """ModelManager 自动发现测试。"""
+        assert env.message.type.value == "election_coordinator"
 
-    def test_auto_discover_gguf(self, tmp_path):
-        models_dir = tmp_path / "models"
-        models_dir.mkdir()
-        (models_dir / "llama-7b.gguf").write_text("fake model")
-        mm = ModelManager(models_dir)
-        mm.auto_discover()
-        assert mm.resolve("llama-7b") is not None
+    def test_envelope_to_election_roundtrip(self):
+        """Envelope 往返还原 ElectionMessage。"""
+        from asc.core.election import (
+            ElectionMessage,
+            ElectionMessageType,
+            election_to_envelope,
+            envelope_to_election,
+        )
 
-    def test_auto_discover_no_models_dir(self, tmp_path):
-        """不存在的目录不报错。"""
-        mm = ModelManager(tmp_path / "nonexistent")
-        mm.auto_discover()
-        assert mm.list_models() == []
+        original = ElectionMessage(type=ElectionMessageType.COORDINATOR, sender_id="n1", election_clock=7)
+        env = election_to_envelope(original)
+        restored = envelope_to_election(env)
 
-    def test_auto_discover_non_gguf_ignored(self, tmp_path):
-        """非 .gguf 文件被忽略。"""
-        models_dir = tmp_path / "models"
-        models_dir.mkdir()
-        (models_dir / "model.bin").write_text("not gguf")
-        (models_dir / "model.gguf").write_text("gguf model")
-        mm = ModelManager(models_dir)
-        mm.auto_discover()
-        models = mm.list_models()
-        assert len(models) == 1
-        assert models[0].model_id == "model"
+        assert restored is not None
+        assert restored.type == ElectionMessageType.COORDINATOR
+        assert restored.sender_id == "n1"
+        assert restored.election_clock == 7
 
-    def test_auto_discover_does_not_overwrite(self, tmp_path):
-        """自动发现不覆盖已注册的模型。"""
-        models_dir = tmp_path / "models"
-        models_dir.mkdir()
-        (models_dir / "llama-7b.gguf").write_text("fake model")
-        mm = ModelManager(models_dir)
-        mm.register("llama-7b", "/custom/path")
-        mm.auto_discover()
-        assert mm.resolve("llama-7b") == "/custom/path"
+    def test_non_election_envelope_returns_none(self):
+        """非选举消息的 Envelope 返回 None。"""
+        from asc.core.election import envelope_to_election
+        from asc.network.protocol import Channel, Envelope, Message, MessageType
 
-
-class TestModelManagerMetadata:
-    """ModelManager 元数据测试。"""
-
-    def test_metadata_local_source(self, tmp_path):
-        mm = ModelManager(tmp_path / "models")
-        mm.register("m1", "/path/to/m1.gguf")
-        meta = mm.list_models()[0]
-        assert meta.source == "local"
-        assert meta.model_id == "m1"
-
-    def test_metadata_file_size_nonexistent(self, tmp_path):
-        """不存在的文件 file_size_mb 为 0。"""
-        mm = ModelManager(tmp_path / "models")
-        mm.register("m1", "/nonexistent/file.gguf")
-        meta = mm.list_models()[0]
-        assert meta.file_size_mb == 0
-
-    def test_metadata_file_size_existing(self, tmp_path):
-        """存在的文件 file_size_mb 正确。"""
-        f = tmp_path / "model.gguf"
-        f.write_bytes(b"x" * (2 * 1024 * 1024))  # 2MB
-        mm = ModelManager(tmp_path / "models")
-        mm.register("m1", str(f))
-        meta = mm.list_models()[0]
-        assert meta.file_size_mb == 2
-
-
-class TestDownloadProgress:
-    """DownloadProgress 值对象测试。"""
-
-    def test_fraction_normal(self):
-        dp = DownloadProgress(model_id="m1", downloaded_mb=50, total_mb=100, speed_mbps=10.0)
-        assert dp.fraction == 0.5
-
-    def test_fraction_zero_total(self):
-        dp = DownloadProgress(model_id="m1", downloaded_mb=0, total_mb=0, speed_mbps=0)
-        assert dp.fraction == 0.0
-
-    def test_fraction_complete(self):
-        dp = DownloadProgress(model_id="m1", downloaded_mb=100, total_mb=100, speed_mbps=5.0)
-        assert dp.fraction == 1.0
-
-
-class TestModelManagerException:
-    """ModelManager 异常场景测试。"""
-
-    def test_download_import_error_path(self, tmp_path):
-        """验证 download() 方法中 huggingface_hub 的延迟导入路径。
-
-        当 huggingface_hub 未安装时，download() 应抛出 ImportError。
-        当前环境中 huggingface_hub 已安装，无法直接测试 ImportError。
-        但可以验证代码路径：download() 使用 try/except ImportError 来
-        检测 huggingface_hub 可用性（Bug #003：此检查在 _find_gguf_filename 之后，
-        导致 filename=None 时先抛出 FileNotFoundError 而非 ImportError）。
-        """
-        mm = ModelManager(tmp_path / "models")
-        # 验证 _find_gguf_filename 对不存在的仓库抛出 FileNotFoundError
-        with pytest.raises(FileNotFoundError, match="未在"):
-            mm._find_gguf_filename("nonexistent/repo")
-
-    def test_download_with_filename_no_repo(self, tmp_path):
-        """指定 filename 但仓库不可达时应抛出异常。
-
-        这验证了 Bug #003：当 filename=None 时，download() 先调用
-        _find_gguf_filename（可能抛出 FileNotFoundError），再 import
-        huggingface_hub（可能抛出 ImportError）。错误处理顺序不合理。
-        """
-        mm = ModelManager(tmp_path / "models")
-        # 指定 filename 可以跳过 _find_gguf_filename
-        gen = mm.download("nonexistent/repo-12345", filename="model.gguf")
-        # 第一个 yield 是初始进度
-        progress = next(gen)
-        assert progress.model_id == "nonexistent/repo-12345"
-        # 后续调用会因网络错误失败
+        env = Envelope(
+            channel=Channel.HEARTBEATS,
+            message=Message(type=MessageType.HEARTBEAT, sender_id="n1", payload={}),
+        )
+        result = envelope_to_election(env)
+        assert result is None

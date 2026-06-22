@@ -357,38 +357,52 @@ class TestClusterTopology:
 class TestAuth:
     """API 认证测试。"""
 
-    def test_no_env_key_allows(self, monkeypatch):
-        """未配置 ASC_API_KEY 且 ASC_ALLOW_NO_AUTH=1 时允许免认证。"""
+    def test_no_env_key_denies(self, monkeypatch):
+        """未配置 ASC_API_KEY 且 ASC_ALLOW_NO_AUTH 未设置时拒绝访问。"""
+        monkeypatch.delenv("ASC_API_KEY", raising=False)
+        monkeypatch.delenv("ASC_ALLOW_NO_AUTH", raising=False)
+        from asc.api.auth import _init_default_store, require_api_key
+        _init_default_store()
+        assert require_api_key() is False
+
+    def test_no_env_key_allow_no_auth(self, monkeypatch):
+        """未配置 ASC_API_KEY 但 ASC_ALLOW_NO_AUTH=1 时允许访问。"""
         monkeypatch.delenv("ASC_API_KEY", raising=False)
         monkeypatch.setenv("ASC_ALLOW_NO_AUTH", "1")
-        from asc.api.auth import require_api_key
+        from asc.api.auth import _init_default_store, require_api_key
+        _init_default_store()
         assert require_api_key() is True
 
-    def test_no_env_key_any_key(self, monkeypatch):
-        """未配置 ASC_API_KEY 且 ASC_ALLOW_NO_AUTH=1 时任何 key 都允许。"""
+    def test_no_env_key_any_key_denies_without_allow(self, monkeypatch):
+        """未配置 ASC_API_KEY 且 ASC_ALLOW_NO_AUTH 未设置时任何 key 都拒绝。"""
         monkeypatch.delenv("ASC_API_KEY", raising=False)
-        monkeypatch.setenv("ASC_ALLOW_NO_AUTH", "1")
-        from asc.api.auth import require_api_key
-        assert require_api_key("any-key") is True
+        monkeypatch.delenv("ASC_ALLOW_NO_AUTH", raising=False)
+        from asc.api.auth import _init_default_store, require_api_key
+        _init_default_store()
+        assert require_api_key("any-key") is False
 
     def test_env_key_match(self, monkeypatch):
         monkeypatch.setenv("ASC_API_KEY", "secret123")
-        from asc.api.auth import require_api_key
+        from asc.api.auth import _init_default_store, require_api_key
+        _init_default_store()
         assert require_api_key("secret123") is True
 
     def test_env_key_mismatch(self, monkeypatch):
         monkeypatch.setenv("ASC_API_KEY", "secret123")
-        from asc.api.auth import require_api_key
+        from asc.api.auth import _init_default_store, require_api_key
+        _init_default_store()
         assert require_api_key("wrong-key") is False
 
     def test_env_key_none_provided(self, monkeypatch):
         monkeypatch.setenv("ASC_API_KEY", "secret123")
-        from asc.api.auth import require_api_key
+        from asc.api.auth import _init_default_store, require_api_key
+        _init_default_store()
         assert require_api_key(None) is False
 
     def test_env_key_empty_provided(self, monkeypatch):
         monkeypatch.setenv("ASC_API_KEY", "secret123")
-        from asc.api.auth import require_api_key
+        from asc.api.auth import _init_default_store, require_api_key
+        _init_default_store()
         assert require_api_key("") is False
 
 
@@ -631,27 +645,35 @@ class TestAPIServer:
     async def test_models_endpoint(self):
         from httpx import ASGITransport, AsyncClient
 
+        from asc.api.auth import _init_default_store
         from asc.api.server import create_app
+        import os
+        os.environ["ASC_API_KEY"] = "test-key"
+        _init_default_store()
         app = create_app(model_mappings={"llama-7b": "/path/to/model.gguf"})
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.get("/v1/models")
+            resp = await client.get("/v1/models", headers={"X-API-Key": "test-key"})
             assert resp.status_code == 200
             data = resp.json()
             assert data["object"] == "list"
             assert len(data["data"]) == 1
+        del os.environ["ASC_API_KEY"]
 
     @pytest.mark.asyncio
     async def test_chat_completions_no_engine(self, monkeypatch):
         from httpx import ASGITransport, AsyncClient
 
+        from asc.api.auth import _init_default_store
         from asc.api.server import create_app
-        monkeypatch.setenv("ASC_ALLOW_NO_AUTH", "1")
+        monkeypatch.setenv("ASC_API_KEY", "test-key")
+        _init_default_store()
         app = create_app()
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.post(
                 "/v1/chat/completions",
+                headers={"X-API-Key": "test-key"},
                 json={
                     "model": "llama-7b",
                     "messages": [{"role": "user", "content": "Hello"}],
@@ -663,24 +685,38 @@ class TestAPIServer:
     async def test_admin_nodes_endpoint(self, monkeypatch):
         from httpx import ASGITransport, AsyncClient
 
+        from asc.api.auth import _init_default_store
         from asc.api.server import create_app
         monkeypatch.setenv("ASC_API_KEY", "test-key")
+        monkeypatch.setenv("ASC_ADMIN_API_KEY", "admin-key")
+        _init_default_store()
         app = create_app()
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
+            # 普通 user key 不能访问 admin 端点
             resp = await client.get("/admin/nodes", headers={"X-API-Key": "test-key"})
+            assert resp.status_code == 403
+            # admin key 可以访问
+            resp = await client.get("/admin/nodes", headers={"X-API-Key": "admin-key"})
             assert resp.status_code == 200
 
     @pytest.mark.asyncio
     async def test_admin_config_endpoint(self, monkeypatch):
         from httpx import ASGITransport, AsyncClient
 
+        from asc.api.auth import _init_default_store
         from asc.api.server import create_app
         monkeypatch.setenv("ASC_API_KEY", "test-key")
+        monkeypatch.setenv("ASC_ADMIN_API_KEY", "admin-key")
+        _init_default_store()
         app = create_app()
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
+            # 普通 user key 不能访问 admin 端点
             resp = await client.get("/admin/config", headers={"X-API-Key": "test-key"})
+            assert resp.status_code == 403
+            # admin key 可以访问
+            resp = await client.get("/admin/config", headers={"X-API-Key": "admin-key"})
             assert resp.status_code == 200
 
 
@@ -729,7 +765,8 @@ class TestMasterNode:
         with pytest.raises(ValueError, match="无可用节点"):
             master.process_create_instance(cmd)
 
-    def test_process_delete_instance(self):
+    @pytest.mark.asyncio
+    async def test_process_delete_instance(self):
         from asc.master.main import MasterNode
         master = MasterNode(node_id="master-1")
         master.process_node_joined(NodeId("n1"), "192.168.1.1", 52415)
@@ -737,16 +774,17 @@ class TestMasterNode:
         master.process_create_instance(cmd)
         inst_id = list(master.state.instances.keys())[0]
         del_cmd = DeleteInstance(instance_id=inst_id)
-        master.process_delete_instance(del_cmd)
+        await master.process_delete_instance(del_cmd)
         assert len(master.state.instances) == 0
 
-    def test_process_delete_nonexistent_instance(self):
+    @pytest.mark.asyncio
+    async def test_process_delete_nonexistent_instance(self):
         """删除不存在的实例应抛出 ValueError。"""
         from asc.master.main import MasterNode
         master = MasterNode(node_id="master-1")
         cmd = DeleteInstance(instance_id=InstanceId("ghost"))
         with pytest.raises(ValueError, match="不存在"):
-            master.process_delete_instance(cmd)
+            await master.process_delete_instance(cmd)
 
     def test_process_start_inference(self):
         from asc.master.main import MasterNode

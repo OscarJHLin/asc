@@ -6,9 +6,11 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 
 def convert_messages_to_prompt(
-    messages: list[dict],
+    messages: list[dict[str, Any]],
     system: str | None = None,
     format: str = "chat",
 ) -> str:

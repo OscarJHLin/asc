@@ -183,8 +183,9 @@ class TestCreateInstanceDistributed:
 class TestDeleteInstance:
     """删除实例。"""
 
+    @pytest.mark.asyncio
     @patch.object(DistributedOrchestrator, "_stop_worker_rpc_server")
-    def test_delete_stops_rpc_servers(self, mock_stop):
+    async def test_delete_stops_rpc_servers(self, mock_stop):
         orch = DistributedOrchestrator()
         nodes = {
             NodeId("worker-1"): StateNodeInfo(
@@ -192,7 +193,7 @@ class TestDeleteInstance:
             ),
         }
 
-        orch.delete_instance(
+        await orch.delete_instance(
             instance_id=InstanceId("i1"),
             node_ids=[NodeId("worker-1")],
             nodes=nodes,

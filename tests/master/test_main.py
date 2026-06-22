@@ -3,6 +3,8 @@
 Master 负责处理 Command、产生 Event、维护状态、调度任务。
 """
 
+import pytest
+
 from asc.core.event_log import MemoryEventLog
 from asc.master.main import MasterNode
 from asc.types import (
@@ -55,14 +57,15 @@ class TestMasterNode:
         assert len(events) == 1
         assert event_type(events[0]) == "task_created"
 
-    def test_process_delete_instance(self):
+    @pytest.mark.asyncio
+    async def test_process_delete_instance(self):
         master = MasterNode(node_id="master")
         master.process_node_joined(NodeId("n1"), "10.0.0.1", 52415)
         master.process_create_instance(CreateInstance(model_id="m", sharding="tensor"))
 
         inst_id = list(master.state.instances.keys())[0]
         cmd = DeleteInstance(instance_id=inst_id)
-        events = master.process_delete_instance(cmd)
+        events = await master.process_delete_instance(cmd)
         assert len(events) == 1
         assert event_type(events[0]) == "instance_deleted"
         assert len(master.state.instances) == 0

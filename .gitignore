@@ -69,6 +69,13 @@ tmp/
 
 # Config
 config.json
+worker_config*.json
+.worker_config*
 
 # Node
 node_modules/
+
+# Local/Audit reports (not for public repo)
+AUDIT_REPORT*.md
+REVIEW_REPORT*.md
+FIX_PLAN.md

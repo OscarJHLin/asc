@@ -1,0 +1,2496 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ASC Cluster</title>
+    <style>
+        :root {
+            --bg-primary: #1a1a2e;
+            --bg-secondary: #16213e;
+            --bg-tertiary: #0f3460;
+            --bg-card: #1e1e3a;
+            --bg-input: #12122a;
+            --border: #2a2a4a;
+            --border-hover: #4a4a7a;
+            --text-primary: #e0e0f0;
+            --text-secondary: #8888aa;
+            --text-muted: #555577;
+            --accent: #6c63ff;
+            --accent-hover: #5a52e0;
+            --accent-glow: rgba(108, 99, 255, 0.15);
+            --success: #4ade80;
+            --success-bg: rgba(74, 222, 128, 0.1);
+            --danger: #f87171;
+            --danger-bg: rgba(248, 113, 113, 0.1);
+            --warning: #fbbf24;
+            --warning-bg: rgba(251, 191, 36, 0.1);
+            --gpu-green: #34d399;
+            --ram-blue: #60a5fa;
+            --cpu-purple: #a78bfa;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 200px;
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+            height: 100vh;
+            position: sticky;
+            top: 0;
+        }
+        .sidebar-logo {
+            padding: 18px 16px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .sidebar-logo .logo-icon {
+            width: 28px; height: 28px;
+            background: var(--accent);
+            border-radius: 6px;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 700; font-size: 14px; color: white;
+        }
+        .sidebar-logo span { font-weight: 600; font-size: 14px; }
+        .sidebar-nav { flex: 1; padding: 8px 6px; }
+        .nav-item {
+            display: flex; align-items: center; gap: 8px;
+            padding: 8px 12px; border-radius: 6px;
+            color: var(--text-secondary); cursor: pointer;
+            font-size: 13px; font-weight: 500;
+            transition: all 0.15s; margin-bottom: 2px;
+        }
+        .nav-item:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+        .nav-item.active { background: var(--accent-glow); color: var(--accent); }
+        .nav-item svg { width: 16px; height: 16px; flex-shrink: 0; }
+        .sidebar-footer { padding: 12px 16px; border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+        .ws-indicator { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); }
+        .ws-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--danger); flex-shrink: 0; }
+        .ws-dot.connected { background: var(--success); box-shadow: 0 0 4px var(--success); }
+        .ws-dot.connecting { background: var(--warning); }
+
+        /* Main */
+        .main { flex: 1; overflow-y: auto; height: 100vh; }
+        .page { display: none; padding: 20px 28px; }
+        .page.active { display: block; }
+        .page-title {
+            font-size: 18px; font-weight: 700; margin-bottom: 20px;
+            display: flex; align-items: center; gap: 10px;
+        }
+        .badge {
+            font-size: 11px; font-weight: 600;
+            padding: 2px 8px; border-radius: 8px;
+            background: var(--accent-glow); color: var(--accent);
+        }
+
+        /* ========== NODES PAGE ========== */
+        .node-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(460px, 1fr));
+            gap: 12px;
+        }
+        .node-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            overflow: hidden;
+            transition: border-color 0.2s;
+        }
+        .node-card:hover { border-color: var(--border-hover); }
+        .node-card-header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        .node-name {
+            font-weight: 600; font-size: 13px;
+            display: flex; align-items: center; gap: 6px;
+        }
+        .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); flex-shrink: 0; }
+        .status-dot.offline { background: var(--danger); }
+        .node-status-text {
+            font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 8px;
+        }
+        .node-status-text.online { background: var(--success-bg); color: var(--success); }
+        .node-status-text.offline { background: var(--danger-bg); color: var(--danger); }
+        .node-card-body { padding: 12px 16px; }
+
+        .resource-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+        .resource-row:last-child { margin-bottom: 0; }
+        .resource-icon {
+            width: 24px; height: 24px; border-radius: 5px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 11px; font-weight: 700; flex-shrink: 0;
+        }
+        .resource-icon.cpu { background: rgba(167, 139, 250, 0.15); color: var(--cpu-purple); }
+        .resource-icon.ram { background: rgba(96, 165, 250, 0.15); color: var(--ram-blue); }
+        .resource-icon.gpu { background: rgba(52, 211, 153, 0.15); color: var(--gpu-green); }
+        .resource-detail { flex: 1; min-width: 0; }
+        .resource-label { display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 3px; }
+        .resource-label .name { color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .resource-label .value { color: var(--text-primary); font-weight: 500; font-variant-numeric: tabular-nums; flex-shrink: 0; margin-left: 8px; }
+        .resource-bar { height: 3px; background: var(--bg-input); border-radius: 2px; overflow: hidden; }
+        .resource-bar-fill { height: 100%; border-radius: 2px; transition: width 0.5s ease; }
+        .resource-bar-fill.cpu { background: var(--cpu-purple); }
+        .resource-bar-fill.ram { background: var(--ram-blue); }
+        .resource-bar-fill.gpu { background: var(--gpu-green); }
+
+        /* Node resource limits */
+        .node-card-limits {
+            padding: 10px 16px 12px;
+            border-top: 1px solid var(--border);
+            background: rgba(0,0,0,0.12);
+        }
+        .limit-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+        .limit-row:last-child { margin-bottom: 0; }
+        .limit-label { font-size: 11px; color: var(--text-muted); width: 70px; flex-shrink: 0; }
+        .limit-slider { flex: 1; }
+        .limit-slider input[type="range"] {
+            width: 100%; height: 3px; border-radius: 2px;
+            background: var(--bg-input); outline: none;
+            -webkit-appearance: none; cursor: pointer;
+        }
+        .limit-slider input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 12px; height: 12px; border-radius: 50%;
+            background: var(--accent); cursor: pointer;
+            border: 2px solid var(--bg-card);
+        }
+        .limit-value {
+            font-size: 11px; font-weight: 600; color: var(--accent);
+            width: 55px; text-align: right; flex-shrink: 0;
+            font-variant-numeric: tabular-nums;
+        }
+        .limit-actions { display: flex; justify-content: flex-end; margin-top: 8px; }
+
+        /* ========== MODELS PAGE ========== */
+        .models-layout {
+            display: flex; gap: 20px; height: calc(100vh - 80px);
+        }
+        .models-left {
+            flex: 1; min-width: 0; display: flex; flex-direction: column;
+        }
+        .models-right {
+            width: 420px; flex-shrink: 0;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            display: flex; flex-direction: column;
+            overflow: hidden;
+            min-height: 400px;
+        }
+        .models-right-header {
+            padding: 14px 16px;
+            border-bottom: 1px solid var(--border);
+            font-weight: 600; font-size: 13px;
+            display: flex; align-items: center; gap: 8px;
+        }
+        .models-right-header .model-file-tag {
+            font-size: 10px; font-weight: 600;
+            padding: 2px 6px; border-radius: 4px;
+            background: rgba(108, 99, 255, 0.15); color: var(--accent);
+        }
+        .models-right-body {
+            flex: 1; overflow-y: auto; padding: 12px 16px;
+        }
+        .models-right-footer {
+            padding: 12px 16px;
+            border-top: 1px solid var(--border);
+            display: flex; gap: 8px;
+        }
+
+        /* Model param sections (LM Studio style) */
+        .param-section { margin-bottom: 16px; }
+        .param-section-title {
+            font-size: 11px; font-weight: 700; color: var(--text-muted);
+            text-transform: uppercase; letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+        .param-row {
+            display: flex; align-items: center; gap: 8px;
+            margin-bottom: 8px; min-height: 32px; padding: 4px 0;
+        }
+        .param-label {
+            font-size: 11px; color: var(--text-secondary);
+            max-width: 180px; flex-shrink: 0;
+            display: flex; align-items: center; gap: 4px;
+            line-height: 1.3;
+        }
+        .param-label .hint {
+            font-size: 10px; color: var(--text-muted); cursor: help;
+        }
+        .param-slider { flex: 1; }
+        .param-slider input[type="range"] {
+            width: 100%; height: 3px; border-radius: 2px;
+            background: var(--bg-input); outline: none;
+            -webkit-appearance: none; cursor: pointer;
+        }
+        .param-slider input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 12px; height: 12px; border-radius: 50%;
+            background: var(--accent); cursor: pointer;
+            border: 2px solid var(--bg-card);
+        }
+        .param-value {
+            font-size: 11px; font-weight: 600; color: var(--accent);
+            width: 50px; text-align: right; flex-shrink: 0;
+            font-variant-numeric: tabular-nums;
+        }
+        .param-input {
+            flex: 1; background: var(--bg-input); border: 1px solid var(--border);
+            border-radius: 4px; padding: 4px 8px; color: var(--text-primary);
+            font-size: 11px; font-variant-numeric: tabular-nums;
+            outline: none;
+        }
+        .param-input:focus { border-color: var(--accent); }
+        .param-select {
+            flex: 1; background: var(--bg-input); border: 1px solid var(--border);
+            border-radius: 4px; padding: 4px 8px; color: var(--text-primary);
+            font-size: 11px; outline: none; cursor: pointer;
+        }
+        .param-select:focus { border-color: var(--accent); }
+        .param-toggle {
+            position: relative; width: 32px; height: 18px; flex-shrink: 0;
+        }
+        .param-toggle input { opacity: 0; width: 0; height: 0; }
+        .param-toggle .toggle-track {
+            position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            background: var(--bg-input); border-radius: 9px;
+            border: 1px solid var(--border); cursor: pointer;
+            transition: all 0.2s;
+        }
+        .param-toggle .toggle-track::after {
+            content: ''; position: absolute; top: 2px; left: 2px;
+            width: 12px; height: 12px; border-radius: 50%;
+            background: var(--text-muted); transition: all 0.2s;
+        }
+        .param-toggle input:checked + .toggle-track {
+            background: var(--accent-glow); border-color: var(--accent);
+        }
+        .param-toggle input:checked + .toggle-track::after {
+            transform: translateX(14px); background: var(--accent);
+        }
+
+        /* Estimated memory */
+        .est-memory {
+            background: var(--bg-input); border-radius: 6px;
+            padding: 10px 12px; margin-bottom: 12px;
+        }
+        .est-memory-title { font-size: 10px; color: var(--text-muted); margin-bottom: 6px; font-weight: 600; }
+        .est-memory-row { display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 3px; }
+        .est-memory-row .label { color: var(--text-secondary); }
+        .est-memory-row .val { font-weight: 600; font-variant-numeric: tabular-nums; }
+        .est-memory-row .val.gpu { color: var(--gpu-green); }
+        .est-memory-row .val.ram { color: var(--ram-blue); }
+
+        /* Drop zone */
+        .drop-zone {
+            border: 2px dashed var(--border);
+            border-radius: 8px; padding: 20px;
+            text-align: center; transition: all 0.2s;
+            cursor: pointer; margin-bottom: 12px;
+        }
+        .drop-zone:hover, .drop-zone.dragover {
+            border-color: var(--accent); background: var(--accent-glow);
+        }
+        .drop-zone-text { font-size: 12px; color: var(--text-secondary); }
+        .drop-zone-hint { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+
+        .upload-progress {
+            display: none; margin-bottom: 12px;
+            background: var(--bg-card); border-radius: 6px; padding: 10px 12px;
+            border: 1px solid var(--border);
+        }
+        .upload-progress-header { display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 6px; }
+        .upload-progress-bar { height: 6px; background: var(--bg-input); border-radius: 3px; overflow: hidden; }
+        .upload-progress-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.3s; }
+
+        .model-item {
+            display: flex; align-items: center; gap: 10px;
+            padding: 10px 12px; background: var(--bg-card);
+            border: 1px solid var(--border); border-radius: 6px;
+            margin-bottom: 6px; transition: all 0.15s; cursor: pointer;
+        }
+        .model-item:hover { border-color: var(--border-hover); }
+        .model-item.selected { border-color: var(--accent); background: var(--accent-glow); }
+        .model-info { flex: 1; min-width: 0; }
+        .model-name {
+            font-weight: 600; font-size: 12px;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .model-meta { font-size: 10px; color: var(--text-muted); margin-top: 1px; }
+        .model-actions { display: flex; gap: 4px; flex-shrink: 0; }
+
+        /* Buttons */
+        .btn {
+            padding: 5px 12px; border: none; border-radius: 5px;
+            cursor: pointer; font-size: 11px; font-weight: 600;
+            transition: all 0.15s; display: inline-flex; align-items: center; gap: 4px;
+        }
+        .btn-accent { background: var(--accent); color: white; }
+        .btn-accent:hover { background: var(--accent-hover); }
+        .btn-ghost { background: transparent; color: var(--text-secondary); border: 1px solid var(--border); }
+        .btn-ghost:hover { border-color: var(--border-hover); color: var(--text-primary); }
+        .btn-danger { background: var(--danger-bg); color: var(--danger); }
+        .btn-danger:hover { background: rgba(248, 113, 113, 0.2); }
+        .btn-success { background: var(--success-bg); color: var(--success); }
+        .btn-success:hover { background: rgba(74, 222, 128, 0.2); }
+
+        /* Log page */
+        .log-panel {
+            background: var(--bg-input); border-radius: 8px;
+            padding: 14px; font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+            font-size: 11px; max-height: 600px; overflow-y: auto;
+            border: 1px solid var(--border);
+        }
+        .log-entry { margin-bottom: 2px; line-height: 1.5; }
+        .log-time { color: var(--text-muted); }
+        .log-info { color: var(--ram-blue); }
+        .log-success { color: var(--success); }
+        .log-error { color: var(--danger); }
+
+        /* Settings Panel */
+        .settings-panel { max-width: 640px; }
+        .setting-group {
+            display: grid; grid-template-columns: 220px 1fr; gap: 8px 16px;
+            padding: 14px 0; border-bottom: 1px solid var(--border);
+            align-items: center;
+        }
+        .setting-label { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+        .setting-control { display: flex; align-items: center; gap: 8px; }
+        .setting-desc { grid-column: 1 / -1; font-size: 11px; color: var(--text-muted); margin-top: -4px; }
+        .setting-input {
+            background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px;
+            color: var(--text-primary); padding: 6px 10px; font-size: 13px; width: 120px;
+            outline: none; transition: border-color 0.2s;
+        }
+        .setting-input:focus { border-color: var(--accent); }
+        .setting-unit { font-size: 12px; color: var(--text-secondary); }
+        .setting-divider { height: 1px; background: var(--border); margin: 8px 0; }
+        .setting-actions { margin-top: 20px; }
+
+        /* Toggle Switch */
+        .toggle { position: relative; display: inline-block; width: 40px; height: 22px; }
+        .toggle input { opacity: 0; width: 0; height: 0; }
+        .toggle-slider {
+            position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+            background: var(--bg-input); border: 1px solid var(--border); border-radius: 22px;
+            transition: 0.3s;
+        }
+        .toggle-slider:before {
+            position: absolute; content: ""; height: 16px; width: 16px;
+            left: 2px; bottom: 2px; background: var(--text-muted);
+            border-radius: 50%; transition: 0.3s;
+        }
+        .toggle input:checked + .toggle-slider { background: var(--accent); border-color: var(--accent); }
+        .toggle input:checked + .toggle-slider:before { transform: translateX(18px); background: #fff; }
+
+        /* Toast */
+        .toast {
+            position: fixed; bottom: 20px; right: 20px;
+            padding: 10px 16px; border-radius: 6px;
+            font-size: 12px; font-weight: 600;
+            transform: translateY(80px); transition: transform 0.3s ease;
+            z-index: 2000; border: 1px solid;
+        }
+        .toast.show { transform: translateY(0); }
+        .toast-success { background: var(--success-bg); color: var(--success); border-color: rgba(74, 222, 128, 0.3); }
+        .toast-error { background: var(--danger-bg); color: var(--danger); border-color: rgba(248, 113, 113, 0.3); }
+
+        /* Manual page */
+        .manual-content { max-width: 800px; }
+        .manual-section { margin-bottom: 8px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+        .manual-section-title {
+            display: flex; align-items: center; gap: 8px;
+            padding: 12px 16px; cursor: pointer;
+            background: var(--bg-secondary); font-size: 13px; font-weight: 600;
+            color: var(--text-primary); user-select: none;
+        }
+        .manual-section-title:hover { background: var(--bg-hover); }
+        .manual-section-title svg { transition: transform 0.2s; flex-shrink: 0; }
+        .manual-section-title.collapsed svg { transform: rotate(0deg); }
+        .manual-section-title:not(.collapsed) svg { transform: rotate(90deg); }
+        .manual-section-body { padding: 16px; display: none; }
+        .manual-section-title:not(.collapsed) + .manual-section-body { display: block; }
+        .manual-section-title.collapsed + .manual-section-body { display: none; }
+        .manual-note { font-size: 12px; color: var(--text-muted); margin: 0 0 12px 0; padding: 8px 12px; background: var(--bg-secondary); border-radius: 6px; border-left: 3px solid var(--accent); }
+        .manual-desc { font-size: 12px; color: var(--text-secondary); margin: 4px 0; }
+        .manual-cmd {
+            background: var(--bg-tertiary, #0d1117); border: 1px solid var(--border);
+            border-radius: 6px; padding: 10px 14px; margin: 6px 0;
+            font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+            font-size: 11.5px; color: #e6edf3; white-space: pre-wrap; word-break: break-all;
+            cursor: pointer; position: relative; line-height: 1.5;
+            transition: border-color 0.15s;
+        }
+        .manual-cmd:hover { border-color: var(--accent); }
+        .manual-cmd:active { background: rgba(99, 102, 241, 0.1); }
+        .manual-step { display: flex; gap: 12px; margin-bottom: 12px; align-items: flex-start; }
+        .manual-step-num {
+            width: 24px; height: 24px; border-radius: 50%;
+            background: var(--accent); color: white;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 12px; font-weight: 700; flex-shrink: 0;
+        }
+        .manual-step-text { font-size: 13px; color: var(--text-secondary); padding-top: 2px; }
+        .manual-subsection { margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+        .manual-subsection:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+        .manual-os-badge {
+            display: inline-block; padding: 3px 10px; border-radius: 4px;
+            font-size: 11px; font-weight: 700; margin-bottom: 8px; text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .manual-os-badge.linux { background: rgba(255, 152, 0, 0.15); color: #ff9800; }
+        .manual-os-badge.windows { background: rgba(0, 120, 212, 0.15); color: #0078d4; }
+        .manual-os-badge.macos { background: rgba(162, 162, 162, 0.15); color: #a2a2a2; }
+        .manual-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+        .manual-table th { text-align: left; padding: 8px 12px; background: var(--bg-secondary); color: var(--text-muted); font-weight: 600; border-bottom: 1px solid var(--border); }
+        .manual-table td { padding: 8px 12px; border-bottom: 1px solid var(--border); color: var(--text-secondary); }
+        .manual-table code { background: var(--bg-tertiary, #0d1117); padding: 2px 6px; border-radius: 3px; font-size: 11px; color: #e6edf3; }
+        .manual-node-card {
+            border: 1px solid var(--border); border-radius: 8px;
+            padding: 12px 16px; margin-bottom: 8px;
+            background: var(--bg-secondary);
+        }
+        .manual-node-card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+        .manual-node-card-name { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+        .manual-node-card-os { font-size: 11px; color: var(--text-muted); }
+
+        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--border-hover); }
+
+        .empty-state { text-align: center; padding: 40px 16px; color: var(--text-muted); }
+        .empty-state-text { font-size: 12px; }
+
+        /* checkboxNumeric mode */
+        .param-checkbox-numeric {
+            display: flex; align-items: center; gap: 8px;
+        }
+        .param-checkbox-numeric input[type="checkbox"] {
+            accent-color: var(--accent);
+        }
+        .param-checkbox-numeric input[type="number"] {
+            background: var(--bg-tertiary, #0d1117); border: 1px solid var(--border);
+            border-radius: 4px; padding: 4px 8px; color: var(--text-primary);
+            font-size: 12px; width: 80px;
+        }
+        .param-checkbox-numeric input[type="number"]:disabled {
+            opacity: 0.4; cursor: not-allowed;
+        }
+
+        /* Accordion sections */
+        .param-accordion { margin-bottom: 8px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+        .param-accordion-header {
+            display: flex; align-items: center; gap: 8px;
+            padding: 8px 12px; cursor: pointer;
+            background: var(--bg-secondary); font-size: 11px; font-weight: 700;
+            color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;
+            user-select: none; transition: background 0.15s;
+        }
+        .param-accordion-header:hover { background: var(--bg-tertiary); }
+        .param-accordion-header svg { transition: transform 0.2s; flex-shrink: 0; width: 12px; height: 12px; }
+        .param-accordion-header.collapsed svg { transform: rotate(0deg); }
+        .param-accordion-header:not(.collapsed) svg { transform: rotate(90deg); }
+        .param-accordion-body { padding: 12px 14px; }
+        .param-accordion-header.collapsed + .param-accordion-body { display: none; }
+        .param-accordion-header:not(.collapsed) + .param-accordion-body { display: block; }
+
+        /* Parameter tags */
+        .param-tag {
+            font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px;
+            text-transform: uppercase; letter-spacing: 0.3px; margin-left: 4px;
+        }
+        .param-tag.machine { background: rgba(96, 165, 250, 0.15); color: var(--ram-blue); }
+        .param-tag.experimental { background: rgba(251, 191, 36, 0.15); color: var(--warning); }
+
+        /* GPU Offload Ratio buttons */
+        .gpu-ratio-btns { display: flex; gap: 4px; }
+        .gpu-ratio-btn {
+            padding: 3px 10px; border: 1px solid var(--border); border-radius: 4px;
+            background: transparent; color: var(--text-secondary); font-size: 11px;
+            font-weight: 600; cursor: pointer; transition: all 0.15s;
+        }
+        .gpu-ratio-btn:hover { border-color: var(--border-hover); color: var(--text-primary); }
+        .gpu-ratio-btn.active { background: var(--accent-glow); border-color: var(--accent); color: var(--accent); }
+
+        /* Disabled GPUs checkboxes */
+        .gpu-checkbox-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+        .gpu-checkbox-item {
+            display: flex; align-items: center; gap: 4px;
+            font-size: 11px; color: var(--text-secondary);
+        }
+        .gpu-checkbox-item input[type="checkbox"] { accent-color: var(--accent); }
+
+        /* Resource estimate */
+        .resource-estimate {
+            background: var(--bg-input); border-radius: 6px;
+            padding: 10px 12px; margin-bottom: 12px;
+        }
+        .resource-estimate-title { font-size: 10px; color: var(--text-muted); margin-bottom: 6px; font-weight: 600; }
+        .resource-estimate-row { display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 3px; }
+        .resource-estimate-row .label { color: var(--text-secondary); }
+        .resource-estimate-row .val { font-weight: 600; font-variant-numeric: tabular-nums; }
+        .resource-estimate-row .val.gpu { color: var(--gpu-green); }
+        .resource-estimate-row .val.ram { color: var(--ram-blue); }
+        .resource-estimate-warning {
+            margin-top: 6px; padding: 6px 10px; border-radius: 4px;
+            background: var(--danger-bg); color: var(--danger); font-size: 11px; font-weight: 600;
+        }
+
+        /* Model type badge */
+        .model-type-badge {
+            font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 3px;
+            text-transform: uppercase; letter-spacing: 0.3px;
+        }
+        .model-type-badge.llm { background: rgba(108, 99, 255, 0.15); color: var(--accent); }
+        .model-type-badge.embedding { background: rgba(52, 211, 153, 0.15); color: var(--gpu-green); }
+
+        /* Model domain type selector */
+        .domain-type-selector { display: flex; gap: 4px; margin-bottom: 12px; }
+        .domain-type-btn {
+            flex: 1; padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px;
+            background: transparent; color: var(--text-secondary); font-size: 11px;
+            font-weight: 600; cursor: pointer; transition: all 0.15s; text-align: center;
+        }
+        .domain-type-btn:hover { border-color: var(--border-hover); color: var(--text-primary); }
+        .domain-type-btn.active { background: var(--accent-glow); border-color: var(--accent); color: var(--accent); }
+
+        /* Chat page */
+        .chat-container { display: flex; flex-direction: column; height: calc(100vh - 60px); }
+        .chat-header { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); margin-bottom: 8px; }
+        .chat-header select {
+            flex: 1; padding: 6px 10px; background: var(--bg-input); border: 1px solid var(--border);
+            border-radius: 6px; color: var(--text-primary); font-size: 12px; outline: none;
+        }
+        .chat-header select:focus { border-color: var(--accent); }
+        .chat-messages { flex: 1; overflow-y: auto; padding: 8px 0; display: flex; flex-direction: column; gap: 12px; }
+        .chat-msg { display: flex; gap: 10px; max-width: 85%; }
+        .chat-msg.user { align-self: flex-end; flex-direction: row-reverse; }
+        .chat-msg-avatar {
+            width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center;
+            justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0;
+        }
+        .chat-msg.assistant .chat-msg-avatar { background: var(--accent-glow); color: var(--accent); }
+        .chat-msg.user .chat-msg-avatar { background: var(--success-bg); color: var(--success); }
+        .chat-msg-content {
+            padding: 10px 14px; border-radius: 10px; font-size: 13px; line-height: 1.6;
+            white-space: pre-wrap; word-break: break-word;
+        }
+        .chat-msg.assistant .chat-msg-content { background: var(--bg-card); border: 1px solid var(--border); }
+        .chat-msg.user .chat-msg-content { background: var(--accent); color: #fff; }
+        .chat-msg-content.error { background: var(--danger-bg); border: 1px solid var(--danger); color: var(--danger); }
+        .chat-input-area { display: flex; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+        .chat-input-area textarea {
+            flex: 1; padding: 10px 14px; background: var(--bg-input); border: 1px solid var(--border);
+            border-radius: 8px; color: var(--text-primary); font-size: 13px; resize: none;
+            outline: none; min-height: 42px; max-height: 120px; font-family: inherit;
+        }
+        .chat-input-area textarea:focus { border-color: var(--accent); }
+        .chat-input-area button {
+            padding: 10px 20px; background: var(--accent); color: #fff; border: none;
+            border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer;
+            transition: background 0.15s; white-space: nowrap;
+        }
+        .chat-input-area button:hover { background: var(--accent-hover); }
+        .chat-input-area button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .chat-empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 13px; }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <div class="sidebar-logo">
+            <div class="logo-icon">A</div>
+            <span>ASC Cluster</span>
+        </div>
+        <div class="sidebar-nav">
+            <div class="nav-item active" onclick="switchPage('nodes-page', this)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><circle cx="6" cy="6" r="1" fill="currentColor"/><circle cx="6" cy="18" r="1" fill="currentColor"/></svg>
+                Nodes
+            </div>
+            <div class="nav-item" onclick="switchPage('models-page', this)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+                Models
+            </div>
+            <div class="nav-item" onclick="switchPage('chat-page', this)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                Chat
+            </div>
+            <div class="nav-item" onclick="switchPage('log-page', this)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                Logs
+            </div>
+            <div class="nav-item" onclick="switchPage('server-page', this)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+                Server
+            </div>
+            <div class="nav-item" onclick="switchPage('manual-page', this)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+                Manual
+            </div>
+        </div>
+        <div class="sidebar-footer">
+            <div class="ws-indicator">
+                <div class="ws-dot" id="ws-dot"></div>
+                <span id="ws-text">Disconnected</span>
+            </div>
+            <div class="sidebar-footer-actions">
+                <button onclick="logout()" title="Logout" style="background:none; border:none; color:var(--text-muted); cursor:pointer; padding:4px; display:flex; align-items:center;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="main">
+        <!-- ===== NODES PAGE ===== -->
+        <div id="nodes-page" class="page active">
+            <div class="page-title">
+                Nodes <span class="badge" id="nodes-count-badge">0 online</span>
+            </div>
+            <div class="node-grid" id="node-grid">
+                <div class="empty-state"><div class="empty-state-text">Waiting for nodes to connect...</div></div>
+            </div>
+        </div>
+
+        <!-- ===== MODELS PAGE ===== -->
+        <div id="models-page" class="page">
+            <div class="page-title">Models</div>
+            <div class="models-layout">
+                <!-- Left: model list -->
+                <div class="models-left">
+                    <div class="drop-zone" id="drop-zone"
+                         ondragover="event.preventDefault(); this.classList.add('dragover')"
+                         ondragleave="this.classList.remove('dragover')"
+                         ondrop="handleFileDrop(event)"
+                         onclick="document.getElementById('file-input').click()">
+                        <div class="drop-zone-text">Drop .gguf files here to upload</div>
+                        <div class="drop-zone-hint">Only .gguf format supported</div>
+                        <input type="file" id="file-input" style="display:none" onchange="handleFileSelect(event)" accept=".gguf" multiple>
+                    </div>
+                    <div class="upload-progress" id="upload-progress">
+                        <div class="upload-progress-header">
+                            <span id="upload-filename" style="color: var(--text-secondary);">Uploading...</span>
+                            <span id="upload-percent" style="color: var(--accent);">0%</span>
+                        </div>
+                        <div class="upload-progress-bar">
+                            <div class="upload-progress-fill" id="upload-bar" style="width: 0%;"></div>
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 8px; margin-bottom: 10px; align-items: center;">
+                        <button class="btn btn-accent" onclick="scanLocalModels()">Scan Server Models</button>
+                        <span style="color: var(--text-muted); font-size: 11px;" id="models-dir-path"></span>
+                    </div>
+                    <div id="local-models-list" style="flex:1; overflow-y: auto;">
+                        <div class="empty-state"><div class="empty-state-text">Click "Scan Server Models" to discover models</div></div>
+                    </div>
+                </div>
+
+                <!-- Right: model parameters (LM Studio style) -->
+                <div class="models-right">
+                    <div class="models-right-header">
+                        <span id="param-model-name">No model selected</span>
+                        <span class="model-file-tag" id="param-model-tag" style="display:none">GGUF</span>
+                    </div>
+                    <div class="models-right-body" id="param-panel">
+                        <div class="empty-state"><div class="empty-state-text">Select a model to configure</div></div>
+                    </div>
+                    <div class="models-right-footer">
+                        <button class="btn btn-ghost" onclick="estimateResources()" style="flex:1">Estimate Resources</button>
+                        <button class="btn btn-ghost" onclick="resetModelParams()" style="flex:1">Reset</button>
+                        <button class="btn btn-accent" onclick="loadModelWithParams()" style="flex:2">Load to Cluster</button>
+                        <button class="btn btn-ghost" onclick="unloadSelectedModel()" style="flex:1;color:var(--danger);border-color:var(--danger);">Unload</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== CHAT PAGE ===== -->
+        <div id="chat-page" class="page">
+            <div class="chat-container">
+                <div class="chat-header">
+                    <select id="chat-model-select">
+                        <option value="">-- Select a model --</option>
+                    </select>
+                    <button class="btn btn-ghost" onclick="clearChat()" style="padding:4px 10px; font-size:11px;">Clear</button>
+                </div>
+                <div class="chat-messages" id="chat-messages">
+                    <div class="chat-empty" id="chat-empty">Load a model and start chatting</div>
+                </div>
+                <div class="chat-input-area">
+                    <textarea id="chat-input" placeholder="Type a message... (Enter to send, Shift+Enter for new line)" rows="1" onkeydown="handleChatKey(event)" oninput="autoResizeTextarea(this)"></textarea>
+                    <button id="chat-send-btn" onclick="sendChatMessage()">Send</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== LOG PAGE ===== -->
+        <div id="log-page" class="page">
+            <div class="page-title">Logs</div>
+            <div class="log-panel" id="log-panel">
+                <div class="log-entry"><span class="log-time">[--:--:--]</span> <span class="log-info">Panel loaded</span></div>
+            </div>
+        </div>
+
+        <div id="server-page" class="page">
+            <div class="page-title">Server Settings</div>
+            <div class="settings-panel" id="settings-panel">
+                <!-- Server Port -->
+                <div class="setting-group">
+                    <div class="setting-label">Server Port</div>
+                    <div class="setting-control">
+                        <input type="number" id="setting-api-port" min="1" max="65535" value="8080" class="setting-input">
+                    </div>
+                    <div class="setting-desc">API 服务监听端口，修改后需重启 Master 生效</div>
+                </div>
+
+                <!-- Require Authentication -->
+                <div class="setting-group">
+                    <div class="setting-label">Require Authentication</div>
+                    <div class="setting-control">
+                        <label class="toggle"><input type="checkbox" id="setting-require-auth" checked><span class="toggle-slider"></span></label>
+                    </div>
+                    <div class="setting-desc">启用后所有 API 请求需要携带 API Key</div>
+                </div>
+
+                <!-- Enable CORS -->
+                <div class="setting-group">
+                    <div class="setting-label">Enable CORS</div>
+                    <div class="setting-control">
+                        <label class="toggle"><input type="checkbox" id="setting-enable-cors" checked><span class="toggle-slider"></span></label>
+                    </div>
+                    <div class="setting-desc">允许跨域请求，浏览器端调用 API 时需要开启</div>
+                </div>
+
+                <!-- Serve on Local Network -->
+                <div class="setting-group">
+                    <div class="setting-label">Serve on Local Network</div>
+                    <div class="setting-control">
+                        <label class="toggle"><input type="checkbox" id="setting-serve-lan" checked><span class="toggle-slider"></span></label>
+                    </div>
+                    <div class="setting-desc">监听 0.0.0.0 而非 127.0.0.1，允许局域网内其他设备访问</div>
+                </div>
+
+                <div class="setting-divider"></div>
+
+                <!-- JIT Loading -->
+                <div class="setting-group">
+                    <div class="setting-label">Just-in-Time Model Loading</div>
+                    <div class="setting-control">
+                        <label class="toggle"><input type="checkbox" id="setting-jit-loading"><span class="toggle-slider"></span></label>
+                    </div>
+                    <div class="setting-desc">首次推理请求时自动加载模型，而非预先加载</div>
+                </div>
+
+                <!-- Auto Unload -->
+                <div class="setting-group">
+                    <div class="setting-label">Auto Unload Unused Models</div>
+                    <div class="setting-control">
+                        <label class="toggle"><input type="checkbox" id="setting-auto-unload"><span class="toggle-slider"></span></label>
+                    </div>
+                    <div class="setting-desc">自动卸载空闲超过 TTL 的模型，释放 GPU/CPU 资源</div>
+                </div>
+
+                <!-- Max Idle TTL -->
+                <div class="setting-group">
+                    <div class="setting-label">Max Idle TTL</div>
+                    <div class="setting-control">
+                        <input type="number" id="setting-max-idle-ttl" min="1" max="1440" value="60" class="setting-input" style="width:80px">
+                        <span class="setting-unit">minutes</span>
+                    </div>
+                    <div class="setting-desc">模型空闲多久后自动卸载</div>
+                </div>
+
+                <!-- Only Keep Last Model -->
+                <div class="setting-group">
+                    <div class="setting-label">Only Keep Last Loaded Model</div>
+                    <div class="setting-control">
+                        <label class="toggle"><input type="checkbox" id="setting-only-last"><span class="toggle-slider"></span></label>
+                    </div>
+                    <div class="setting-desc">仅保留最近使用的模型，自动卸载其他模型</div>
+                </div>
+
+                <div class="setting-actions">
+                    <button class="btn btn-accent" onclick="saveServerSettings()">Apply Settings</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== MANUAL PAGE ===== -->
+        <div id="manual-page" class="page">
+            <div class="page-title">Manual</div>
+            <div class="manual-content" id="manual-content">
+
+                <!-- Section: Quick Start -->
+                <div class="manual-section">
+                    <div class="manual-section-title" onclick="toggleManualSection(this)">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                        Quick Start
+                    </div>
+                    <div class="manual-section-body">
+                        <div class="manual-step">
+                            <div class="manual-step-num">1</div>
+                            <div class="manual-step-text">Start Master node on your server:</div>
+                            <div class="manual-cmd" onclick="copyCmd(this)">asc master --host 0.0.0.0 --port 52414 --api-port 8080 --non-interactive --skip-benchmark</div>
+                        </div>
+                        <div class="manual-step">
+                            <div class="manual-step-num">2</div>
+                            <div class="manual-step-text">Start Worker node and connect to Master:</div>
+                            <div class="manual-cmd" onclick="copyCmd(this)">asc worker --master-host &lt;MASTER_IP&gt; --master-port 52414 --non-interactive --skip-benchmark</div>
+                        </div>
+                        <div class="manual-step">
+                            <div class="manual-step-num">3</div>
+                            <div class="manual-step-text">Open WebUI at <code>http://&lt;MASTER_IP&gt;:8080</code> and enter API Key to manage the cluster.</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Section: Autostart on Boot -->
+                <div class="manual-section">
+                    <div class="manual-section-title" onclick="toggleManualSection(this)">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                        Autostart on Boot
+                    </div>
+                    <div class="manual-section-body">
+                        <p class="manual-note">Run the following commands on each node's machine. Replace <code>&lt;MASTER_IP&gt;</code> with the actual Master IP address.</p>
+
+                        <div class="manual-subsection">
+                            <div class="manual-os-badge linux">Linux (systemd)</div>
+                            <p class="manual-desc">Master node autostart:</p>
+                            <div class="manual-cmd" onclick="copyCmd(this)">sudo tee /etc/systemd/system/asc-master.service &lt;&lt;'EOF'
+[Unit]
+Description=ASC Master Node
+After=network.target
+
+[Service]
+Type=simple
+User=$USER
+WorkingDirectory=$PWD
+ExecStart=$(which python) -m asc.cli.main master --host 0.0.0.0 --port 52414 --api-port 8080 --non-interactive --skip-benchmark
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF</div>
+                            <div class="manual-cmd" onclick="copyCmd(this)">sudo systemctl daemon-reload &amp;&amp; sudo systemctl enable asc-master.service</div>
+
+                            <p class="manual-desc" style="margin-top:12px">Worker node autostart:</p>
+                            <div class="manual-cmd" onclick="copyCmd(this)">sudo tee /etc/systemd/system/asc-worker.service &lt;&lt;'EOF'
+[Unit]
+Description=ASC Worker Node
+After=network.target
+
+[Service]
+Type=simple
+User=$USER
+WorkingDirectory=$PWD
+ExecStart=$(which python) -m asc.cli.main worker --master-host &lt;MASTER_IP&gt; --master-port 52414 --non-interactive --skip-benchmark
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF</div>
+                            <div class="manual-cmd" onclick="copyCmd(this)">sudo systemctl daemon-reload &amp;&amp; sudo systemctl enable asc-worker.service</div>
+
+                            <p class="manual-desc" style="margin-top:12px">Disable autostart:</p>
+                            <div class="manual-cmd" onclick="copyCmd(this)">sudo systemctl disable asc-master.service</div>
+                            <div class="manual-cmd" onclick="copyCmd(this)">sudo systemctl disable asc-worker.service</div>
+                        </div>
+
+                        <div class="manual-subsection">
+                            <div class="manual-os-badge windows">Windows (Task Scheduler)</div>
+                            <p class="manual-desc">Master node autostart (run in CMD as Administrator):</p>
+                            <div class="manual-cmd" onclick="copyCmd(this)">schtasks /create /tn "ASC_Master" /tr "cmd /c cd /d %CD% && python -m asc.cli.main master --host 0.0.0.0 --port 52414 --api-port 8080 --non-interactive --skip-benchmark" /sc onlogon /rl highest /f</div>
+
+                            <p class="manual-desc" style="margin-top:12px">Worker node autostart:</p>
+                            <div class="manual-cmd" onclick="copyCmd(this)">schtasks /create /tn "ASC_Worker" /tr "cmd /c cd /d %CD% && python -m asc.cli.main worker --master-host &lt;MASTER_IP&gt; --master-port 52414 --non-interactive --skip-benchmark" /sc onlogon /rl highest /f</div>
+
+                            <p class="manual-desc" style="margin-top:12px">Disable autostart:</p>
+                            <div class="manual-cmd" onclick="copyCmd(this)">schtasks /delete /tn "ASC_Master" /f</div>
+                            <div class="manual-cmd" onclick="copyCmd(this)">schtasks /delete /tn "ASC_Worker" /f</div>
+                        </div>
+
+                        <div class="manual-subsection">
+                            <div class="manual-os-badge macos">macOS (launchd)</div>
+                            <p class="manual-desc">Master node autostart:</p>
+                            <div class="manual-cmd" onclick="copyCmd(this)">cat &lt;&lt;'EOF' &gt; ~/Library/LaunchAgents/com.asc.master.plist
+&lt;?xml version="1.0" encoding="UTF-8"?&gt;
+&lt;!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"&gt;
+&lt;plist version="1.0"&gt;
+&lt;dict&gt;
+  &lt;key&gt;Label&lt;/key&gt;&lt;string&gt;com.asc.master&lt;/string&gt;
+  &lt;key&gt;ProgramArguments&lt;/key&gt;&lt;array&gt;
+    &lt;string&gt;$(which python)&lt;/string&gt;&lt;string&gt;-m&lt;/string&gt;&lt;string&gt;asc.cli.main&lt;/string&gt;
+    &lt;string&gt;master&lt;/string&gt;&lt;string&gt;--host&lt;/string&gt;&lt;string&gt;0.0.0.0&lt;/string&gt;
+    &lt;string&gt;--port&lt;/string&gt;&lt;string&gt;52414&lt;/string&gt;&lt;string&gt;--api-port&lt;/string&gt;&lt;string&gt;8080&lt;/string&gt;
+    &lt;string&gt;--non-interactive&lt;/string&gt;&lt;string&gt;--skip-benchmark&lt;/string&gt;
+  &lt;/array&gt;
+  &lt;key&gt;RunAtLoad&lt;/key&gt;&lt;true/&gt;
+  &lt;key&gt;KeepAlive&lt;/key&gt;&lt;true/&gt;
+&lt;/dict&gt;
+&lt;/plist&gt;
+EOF</div>
+                            <div class="manual-cmd" onclick="copyCmd(this)">launchctl load ~/Library/LaunchAgents/com.asc.master.plist</div>
+
+                            <p class="manual-desc" style="margin-top:12px">Worker node autostart:</p>
+                            <div class="manual-cmd" onclick="copyCmd(this)">cat &lt;&lt;'EOF' &gt; ~/Library/LaunchAgents/com.asc.worker.plist
+&lt;?xml version="1.0" encoding="UTF-8"?&gt;
+&lt;!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"&gt;
+&lt;plist version="1.0"&gt;
+&lt;dict&gt;
+  &lt;key&gt;Label&lt;/key&gt;&lt;string&gt;com.asc.worker&lt;/string&gt;
+  &lt;key&gt;ProgramArguments&lt;/key&gt;&lt;array&gt;
+    &lt;string&gt;$(which python)&lt;/string&gt;&lt;string&gt;-m&lt;/string&gt;&lt;string&gt;asc.cli.main&lt;/string&gt;
+    &lt;string&gt;worker&lt;/string&gt;&lt;string&gt;--master-host&lt;/string&gt;&lt;string&gt;&lt;MASTER_IP&gt;&lt;/string&gt;
+    &lt;string&gt;--master-port&lt;/string&gt;&lt;string&gt;52414&lt;/string&gt;
+    &lt;string&gt;--non-interactive&lt;/string&gt;&lt;string&gt;--skip-benchmark&lt;/string&gt;
+  &lt;/array&gt;
+  &lt;key&gt;RunAtLoad&lt;/key&gt;&lt;true/&gt;
+  &lt;key&gt;KeepAlive&lt;/key&gt;&lt;true/&gt;
+&lt;/dict&gt;
+&lt;/plist&gt;
+EOF</div>
+                            <div class="manual-cmd" onclick="copyCmd(this)">launchctl load ~/Library/LaunchAgents/com.asc.worker.plist</div>
+
+                            <p class="manual-desc" style="margin-top:12px">Disable autostart:</p>
+                            <div class="manual-cmd" onclick="copyCmd(this)">launchctl unload ~/Library/LaunchAgents/com.asc.master.plist</div>
+                            <div class="manual-cmd" onclick="copyCmd(this)">launchctl unload ~/Library/LaunchAgents/com.asc.worker.plist</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Section: Per-Node Autostart -->
+                <div class="manual-section">
+                    <div class="manual-section-title" onclick="toggleManualSection(this)">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                        Per-Node Autostart
+                    </div>
+                    <div class="manual-section-body" id="node-autostart-commands">
+                        <p class="manual-note">Commands for each connected node are shown below, based on the node's operating system. Click to copy.</p>
+                        <div id="node-autostart-list" class="manual-node-list">
+                            <p style="color:var(--text-muted); font-size:12px;">No nodes connected yet. Connect a worker node to see its autostart commands.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Section: Environment Variables -->
+                <div class="manual-section">
+                    <div class="manual-section-title" onclick="toggleManualSection(this)">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                        Environment Variables
+                    </div>
+                    <div class="manual-section-body">
+                        <table class="manual-table">
+                            <thead><tr><th>Variable</th><th>Description</th><th>Default</th></tr></thead>
+                            <tbody>
+                                <tr><td><code>ASC_ADMIN_API_KEY</code></td><td>Admin API Key for authentication</td><td>Required</td></tr>
+                                <tr><td><code>ASC_ROLE</code></td><td>Node role (master/worker) for non-interactive mode</td><td>worker</td></tr>
+                                <tr><td><code>ASC_MASTER_HOST</code></td><td>Master node IP address (worker only)</td><td>-</td></tr>
+                                <tr><td><code>ASC_MASTER_PORT</code></td><td>Master node TCP port (worker only)</td><td>52414</td></tr>
+                                <tr><td><code>ASC_CONFIG_DIR</code></td><td>Configuration directory path</td><td>~/.asc</td></tr>
+                                <tr><td><code>ASC_CONFIG_PATH</code></td><td>Full path to config file</td><td>~/.asc/node_config.json</td></tr>
+                                <tr><td><code>ASC_NODE_ID</code></td><td>Custom node ID</td><td>Auto-generated</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Section: CLI Reference -->
+                <div class="manual-section">
+                    <div class="manual-section-title" onclick="toggleManualSection(this)">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                        CLI Reference
+                    </div>
+                    <div class="manual-section-body">
+                        <table class="manual-table">
+                            <thead><tr><th>Command</th><th>Description</th></tr></thead>
+                            <tbody>
+                                <tr><td><code>asc master</code></td><td>Start Master node</td></tr>
+                                <tr><td><code>asc worker</code></td><td>Start Worker node</td></tr>
+                                <tr><td><code>asc start --role &lt;role&gt;</code></td><td>Start node with specified role</td></tr>
+                                <tr><td><code>asc status</code></td><td>Show local node status</td></tr>
+                                <tr><td><code>asc discover</code></td><td>Scan subnet for nodes</td></tr>
+                            </tbody>
+                        </table>
+                        <p class="manual-desc" style="margin-top:12px">Common flags:</p>
+                        <table class="manual-table">
+                            <thead><tr><th>Flag</th><th>Description</th></tr></thead>
+                            <tbody>
+                                <tr><td><code>--host</code></td><td>Listen address (default: 0.0.0.0)</td></tr>
+                                <tr><td><code>--port</code></td><td>Listen port (Master: 52414, Worker: 52415)</td></tr>
+                                <tr><td><code>--master-host</code></td><td>Master IP for Worker (replaces auto-discover)</td></tr>
+                                <tr><td><code>--master-port</code></td><td>Master TCP port (default: 52414)</td></tr>
+                                <tr><td><code>--non-interactive</code></td><td>Read config from env vars, no stdin prompts</td></tr>
+                                <tr><td><code>--skip-benchmark</code></td><td>Skip benchmark on startup</td></tr>
+                                <tr><td><code>--reconfigure</code></td><td>Re-run first-time setup</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="toast"></div>
+
+    <!-- API Key 输入遮罩 -->
+    <div id="auth-overlay" style="position:fixed; inset:0; z-index:9999; background:var(--bg-primary,#0d1117); display:none; align-items:center; justify-content:center;">
+        <div style="background:var(--bg-secondary,#161b22); border:1px solid var(--border,#30363d); border-radius:12px; padding:32px 40px; text-align:center; max-width:400px; width:90%;">
+            <div style="font-size:24px; font-weight:600; color:var(--text-primary,#e6edf3); margin-bottom:8px;">ASC Cluster</div>
+            <div style="font-size:13px; color:var(--text-muted,#8b949e); margin-bottom:24px;">Enter Admin API Key to continue</div>
+            <input type="password" id="auth-key-input" placeholder="API Key" style="width:100%; padding:10px 14px; background:var(--bg-tertiary,#0d1117); border:1px solid var(--border,#30363d); border-radius:8px; color:var(--text-primary,#e6edf3); font-size:14px; outline:none; margin-bottom:16px; box-sizing:border-box;">
+            <div id="auth-error" style="display:none; color:var(--danger,#f85149); font-size:12px; margin-bottom:12px;"></div>
+            <button id="auth-submit-btn" style="width:100%; padding:10px; background:var(--accent,#58a6ff); color:#fff; border:none; border-radius:8px; font-size:14px; font-weight:500; cursor:pointer;">Connect</button>
+        </div>
+    </div>
+
+    <script>
+        // HTML 转义函数：防止 XSS 攻击
+        function esc(str) {
+            if (str == null) return '';
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+        function escAttr(str) {
+            return esc(str).replace(/'/g, '&#39;').replace(/"/g, '&quot;');
+        }
+
+        // TODO: 测试期间自动填充 API Key，正式版恢复认证
+        let API_KEY = localStorage.getItem('asc_api_key') || 'asc-api-key-oscarlin-2026';
+
+        let ws = null, reconnectTimer = null, reconnectDelay = 2000, authFailed = false;
+        let nodes = [];
+        let nodePolicies = {};  // 缓存节点资源策略 { node_id: { memory_limit_mb, vram_limit_mb } }
+        let selectedModel = null;
+        let modelParams = {};
+        let modelDomainType = "llm"; // "llm" / "embedding"
+
+        function showAuthOverlay() {
+            const overlay = document.getElementById('auth-overlay');
+            overlay.style.display = 'flex';
+            const input = document.getElementById('auth-key-input');
+            const errEl = document.getElementById('auth-error');
+            errEl.style.display = 'none';
+            input.value = '';
+            input.focus();
+            // 避免重复绑定事件
+            input.onkeydown = (e) => { if (e.key === 'Enter') submitApiKey(); };
+            document.getElementById('auth-submit-btn').onclick = submitApiKey;
+        }
+
+        function logout() {
+            localStorage.removeItem('asc_api_key');
+            API_KEY = '';
+            if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+            if (ws) { ws.close(); ws = null; }
+            reconnectDelay = 2000; authFailed = false; 
+            nodes = []; selectedModel = null; modelParams = {};
+            showAuthOverlay();
+        }
+
+        async function submitApiKey() {
+            const input = document.getElementById('auth-key-input');
+            const key = input.value.trim();
+            const errEl = document.getElementById('auth-error');
+            if (!key) { errEl.textContent = 'API Key cannot be empty'; errEl.style.display = 'block'; return; }
+            // 验证 key 是否有效
+            try {
+                const resp = await fetch('/admin/nodes', { headers: { 'X-API-Key': key } });
+                if (!resp.ok) { errEl.textContent = 'Invalid API Key'; errEl.style.display = 'block'; return; }
+            } catch (e) {
+                errEl.textContent = 'Network error, cannot verify API Key';
+                errEl.style.display = 'block';
+                return;
+            }
+            API_KEY = key;
+            localStorage.setItem('asc_api_key', key);
+            document.getElementById('auth-overlay').style.display = 'none';
+            initApp();
+        }
+
+        let policiesLoaded = false;
+
+        async function loadNodePolicies() {
+            try {
+                const data = await apiCall('GET', '/admin/resource-policy/nodes');
+                nodePolicies = data.node_policies || {};
+                policiesLoaded = true;
+                // 清空 grid 防止 updateNodeList 中的 savedSliders 捕获旧值覆盖服务器数据
+                const grid = document.getElementById('node-grid');
+                if (grid) grid.innerHTML = '';
+                // 重新渲染节点列表以反映最新策略
+                if (nodes.length > 0) updateNodeList({ nodes: nodes, node_policies: nodePolicies });
+            } catch (e) { showToast('Failed to load policies', 'error'); }
+        }
+
+        async function initApp() {
+            connectWebSocket();
+            log('ASC Cluster panel loaded');
+        }
+
+        // TODO: 测试期间跳过认证，正式版恢复
+        if (!API_KEY) {
+            showAuthOverlay();
+        } else {
+            localStorage.setItem('asc_api_key', API_KEY);
+            initApp();
+        }
+
+        function getWSUrl() {
+            const key = localStorage.getItem('asc_api_key') || '';
+            const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            return `${wsProtocol}//${window.location.host}/ws/cluster?token=${encodeURIComponent(key)}`;
+        }
+
+        function log(msg, type = 'info') {
+            const panel = document.getElementById('log-panel');
+            const time = new Date().toLocaleTimeString();
+            const cls = type === 'error' ? 'log-error' : type === 'success' ? 'log-success' : 'log-info';
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.innerHTML = '<span class="log-time">[' + esc(time) + ']</span> ';
+            const span = document.createElement('span');
+            span.className = cls;
+            span.textContent = msg;
+            entry.appendChild(span);
+            panel.appendChild(entry);
+            // 限制日志条目数量，防止内存泄漏
+            while (panel.children.length > 500) {
+                panel.removeChild(panel.firstChild);
+            }
+            panel.scrollTop = panel.scrollHeight;
+        }
+
+        let toastTimer = null;
+        function showToast(msg, type = 'success') {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.className = 'toast toast-' + type + ' show';
+            if (toastTimer) clearTimeout(toastTimer);
+            toastTimer = setTimeout(() => toast.classList.remove('show'), 3000);
+        }
+
+        function switchPage(pageId, navEl) {
+            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+            document.getElementById(pageId).classList.add('active');
+            navEl.classList.add('active');
+            if (pageId === 'server-page') loadServerSettings();
+        }
+
+        function formatMB(mb) {
+            if (!mb || mb <= 0) return '0 MB';
+            if (mb >= 1024) return (mb / 1024).toFixed(1) + ' GB';
+            return mb + ' MB';
+        }
+
+        // ========== WebSocket ==========
+        function connectWebSocket() {
+            if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+            const dot = document.getElementById('ws-dot');
+            const text = document.getElementById('ws-text');
+            dot.className = 'ws-dot connecting'; text.textContent = 'Connecting...';
+
+            const url = getWSUrl();
+            if (!url.includes('token=') || url.endsWith('token=')) {
+                dot.className = 'ws-dot'; text.textContent = 'No Key';
+                log('No API Key, please refresh', 'error'); return;
+            }
+            ws = new WebSocket(url);
+            ws.onopen = () => {
+                authFailed = false; reconnectDelay = 2000;
+                dot.className = 'ws-dot connected'; text.textContent = 'Connected';
+                log('WebSocket connected', 'success');
+            };
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'cluster_state') updateClusterOverview(data.data);
+                    else if (data.type === 'node_update') updateNodeList(data.data);
+                    else if (data.type === 'config_update') log('Config updated', 'success');
+                    else if (data.type === 'model_load_progress') handleLoadProgress(data.data);
+                    else if (data.type === 'error') log('Error: ' + data.message, 'error');
+                } catch (e) {
+                    log('Invalid WS message format', 'error');
+                }
+            };
+            ws.onclose = (event) => {
+                dot.className = 'ws-dot'; text.textContent = 'Disconnected';
+                if (event.code === 1008) {
+                    authFailed = true; localStorage.removeItem('asc_api_key'); API_KEY = '';
+                    log('Auth failed', 'error');
+                    showToast('Invalid API Key', 'error');
+                    showAuthOverlay();
+                    return;
+                }
+                log(`WS closed (${event.code}), reconnecting...`, 'error');
+                reconnectTimer = setTimeout(connectWebSocket, reconnectDelay);
+                reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+            };
+            ws.onerror = () => { log('WS error', 'error'); };
+        }
+
+        function updateClusterOverview(state) {
+            document.getElementById('nodes-count-badge').textContent = `${state.online_nodes || 0} online`;
+        }
+
+        function updateNodeList(nodeData) {
+            nodes = nodeData.nodes || [];
+            // 只在用户手动刷新后才从后端拉取策略，不从 WebSocket 自动覆盖
+            if (policiesLoaded && nodeData.node_policies) {
+                nodePolicies = nodeData.node_policies;
+            }
+            updateChatModelSelect();
+            const grid = document.getElementById('node-grid');
+            if (nodes.length === 0) {
+                grid.innerHTML = '<div class="empty-state"><div class="empty-state-text">Waiting for nodes...</div></div>';
+                return;
+            }
+
+            // 保存当前滑块值，防止重渲染时丢失用户修改
+            const savedSliders = {};
+            grid.querySelectorAll('input[type="range"]').forEach(s => {
+                const key = s.dataset.node + ':' + s.dataset.type;
+                savedSliders[key] = s.value;
+            });
+            grid.innerHTML = nodes.map(node => {
+                const isOnline = node.online;
+                const cpuBrand = node.cpu_brand || 'Unknown';
+                const cpuCount = node.cpu_count || 0;
+                const memTotal = node.memory_total_mb || 0;
+                const memFree = node.memory_free_mb || 0;
+                const memUsed = memTotal - memFree;
+                const memPct = memTotal > 0 ? Math.round(memUsed / memTotal * 100) : 0;
+                const gpus = node.gpus || [];
+                const score = (node.compute_score || 0).toFixed(2);
+                const osType = node.os_type || '';
+                const osArch = node.os_arch || '';
+                const osBadge = osType === 'Linux' ? '<span class="manual-os-badge linux" style="font-size:9px;padding:1px 6px;margin-left:6px;">Linux</span>'
+                    : osType === 'Windows' ? '<span class="manual-os-badge windows" style="font-size:9px;padding:1px 6px;margin-left:6px;">Windows</span>'
+                    : osType === 'Darwin' ? '<span class="manual-os-badge macos" style="font-size:9px;padding:1px 6px;margin-left:6px;">macOS</span>'
+                    : osType ? '<span style="font-size:9px;color:var(--text-muted);margin-left:6px;">' + esc(osType) + '</span>' : '';
+
+                let gpuHtml = '';
+                gpus.forEach((g, i) => {
+                    const vTotal = g.vram_total_mb || 0;
+                    const vFree = g.vram_free_mb || 0;
+                    const vUsed = vTotal - vFree;
+                    const vPct = vTotal > 0 ? Math.round(vUsed / vTotal * 100) : 0;
+                    gpuHtml += `
+                    <div class="resource-row">
+                        <div class="resource-icon gpu">G</div>
+                        <div class="resource-detail">
+                            <div class="resource-label">
+                                <span class="name">${esc(g.name || 'GPU ' + i)}</span>
+                                <span class="value">${formatMB(vUsed)} / ${formatMB(vTotal)}</span>
+                            </div>
+                            <div class="resource-bar"><div class="resource-bar-fill gpu" style="width: ${vPct}%"></div></div>
+                        </div>
+                    </div>`;
+                });
+                if (!gpus.length) {
+                    gpuHtml = `<div class="resource-row"><div class="resource-icon gpu">G</div><div class="resource-detail"><div class="resource-label"><span class="name">No GPU</span><span class="value">-</span></div><div class="resource-bar"><div class="resource-bar-fill gpu" style="width:0%"></div></div></div></div>`;
+                }
+
+                const maxMem = memTotal > 0 ? memTotal : 1000;
+                const totalVram = gpus.reduce((s, g) => s + (g.vram_total_mb || 0), 0);
+                const maxVram = totalVram > 0 ? totalVram : 1000;
+                // 从缓存策略中获取已保存的限制值
+                const policy = nodePolicies[node.node_id] || {};
+                const memLimitVal = policy.memory_limit_mb != null ? policy.memory_limit_mb : maxMem;
+                const vramLimitVal = policy.vram_limit_mb != null ? policy.vram_limit_mb : maxVram;
+
+                return `
+                <div class="node-card">
+                    <div class="node-card-header">
+                        <div class="node-name"><div class="status-dot ${isOnline ? '' : 'offline'}"></div>${esc(node.node_id)}${osBadge}</div>
+                        <span class="node-status-text ${isOnline ? 'online' : 'offline'}">${isOnline ? 'Online' : 'Offline'}</span>
+                    </div>
+                    <div class="node-card-body">
+                        <div class="resource-row">
+                            <div class="resource-icon cpu">C</div>
+                            <div class="resource-detail">
+                                <div class="resource-label"><span class="name">${esc(cpuBrand)}</span><span class="value">${cpuCount} cores</span></div>
+                                <div class="resource-bar"><div class="resource-bar-fill cpu" style="width:0%"></div></div>
+                            </div>
+                        </div>
+                        <div class="resource-row">
+                            <div class="resource-icon ram">M</div>
+                            <div class="resource-detail">
+                                <div class="resource-label"><span class="name">RAM</span><span class="value">${formatMB(memUsed)} / ${formatMB(memTotal)}</span></div>
+                                <div class="resource-bar"><div class="resource-bar-fill ram" style="width:${memPct}%"></div></div>
+                            </div>
+                        </div>
+                        ${gpuHtml}
+                        <div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:6px;">${(node.loaded_model_ids || []).map(m => `<span style="font-size:9px;padding:1px 6px;background:var(--accent-glow);color:var(--accent);border-radius:3px;display:inline-flex;align-items:center;gap:3px;">${esc(m)}<span style="cursor:pointer;color:var(--danger);font-weight:bold;" onclick="event.stopPropagation();unloadModel('${escAttr(m)}')" title="Unload model">&times;</span></span>`).join('') || '<span style="font-size:9px;color:var(--text-muted);">No models loaded</span>'}</div>
+                        <div style="text-align:right;font-size:10px;color:var(--text-muted);margin-top:4px;">Score: ${score}</div>
+                    </div>
+                    <div class="node-card-limits">
+                        <div class="limit-row">
+                            <span class="limit-label">RAM Limit</span>
+                            <div class="limit-slider"><input type="range" min="0" max="${maxMem}" value="${memLimitVal}" step="64"
+                                oninput="this.parentElement.nextElementSibling.textContent=this.value==${maxMem}?'No limit':formatMB(+this.value)"
+                                data-node="${escAttr(node.node_id)}" data-type="mem"></div>
+                            <span class="limit-value">${memLimitVal == maxMem ? 'No limit' : formatMB(+memLimitVal)}</span>
+                        </div>
+                        <div class="limit-row">
+                            <span class="limit-label">VRAM Limit</span>
+                            <div class="limit-slider"><input type="range" min="0" max="${maxVram}" value="${vramLimitVal}" step="64"
+                                oninput="this.parentElement.nextElementSibling.textContent=this.value==${maxVram}?'No limit':formatMB(+this.value)"
+                                data-node="${escAttr(node.node_id)}" data-type="vram"></div>
+                            <span class="limit-value">${vramLimitVal == maxVram ? 'No limit' : formatMB(+vramLimitVal)}</span>
+                        </div>
+                        <div class="limit-actions">
+                            <button class="btn btn-ghost" onclick="loadNodePolicies()" style="flex:1;font-size:11px;">Refresh</button>
+                            <button class="btn btn-accent" onclick="applyNodeLimits('${escAttr(node.node_id)}', this)" style="flex:1;">Apply</button>
+                        </div>
+                    </div>
+                </div>`;
+            }).join('');
+
+            // Update per-node autostart commands in Manual page
+            updateNodeAutostartCommands(nodes);
+
+            // 恢复之前保存的滑块值
+            grid.querySelectorAll('input[type="range"]').forEach(s => {
+                const key = s.dataset.node + ':' + s.dataset.type;
+                if (key in savedSliders) {
+                    s.value = savedSliders[key];
+                    // 同步显示文本
+                    const max = parseInt(s.max);
+                    const val = parseInt(s.value);
+                    s.parentElement.nextElementSibling.textContent = val >= max ? 'No limit' : formatMB(val);
+                }
+            });
+        }
+
+        function updateNodeAutostartCommands(nodes) {
+            const container = document.getElementById('node-autostart-list');
+            if (!container) return;
+            if (!nodes || nodes.length === 0) {
+                container.innerHTML = '<p style="color:var(--text-muted); font-size:12px;">No nodes connected yet.</p>';
+                return;
+            }
+            // Also add Master node (this machine)
+            const masterIp = window.location.hostname || '127.0.0.1';
+            let html = '';
+
+            // Master node
+            html += `<div class="manual-node-card">
+                <div class="manual-node-card-header">
+                    <span class="manual-node-card-name">Master (this machine)</span>
+                    <span class="manual-os-badge linux" style="font-size:9px;padding:1px 6px;">Auto-detect</span>
+                </div>
+                <p class="manual-desc">Enable Master autostart on this machine:</p>
+                <div class="manual-cmd" onclick="copyCmd(this)">sudo tee /etc/systemd/system/asc-master.service &lt;&lt;'EOF'\n[Unit]\nDescription=ASC Master Node\nAfter=network.target\n\n[Service]\nType=simple\nUser=$USER\nWorkingDirectory=$PWD\nExecStart=$(which python) -m asc.cli.main master --host 0.0.0.0 --port 52414 --api-port 8080 --non-interactive --skip-benchmark\nRestart=on-failure\nRestartSec=5\n\n[Install]\nWantedBy=multi-user.target\nEOF\nsudo systemctl daemon-reload &amp;&amp; sudo systemctl enable asc-master.service</div>
+            </div>`;
+
+            // Worker nodes
+            nodes.forEach(node => {
+                const osType = node.os_type || 'Unknown';
+                const osArch = node.os_arch || '';
+                const osBadgeClass = osType === 'Linux' ? 'linux' : osType === 'Windows' ? 'windows' : osType === 'Darwin' ? 'macos' : 'linux';
+                const osLabel = osType === 'Darwin' ? 'macOS' : osType;
+
+                let enableCmd = '';
+                let disableCmd = '';
+                const masterHost = masterIp;
+
+                if (osType === 'Windows') {
+                    enableCmd = `schtasks /create /tn "ASC_Worker_${esc(node.node_id)}" /tr "cmd /c cd /d %CD% && python -m asc.cli.main worker --master-host ${masterHost} --master-port 52414 --non-interactive --skip-benchmark" /sc onlogon /rl highest /f`;
+                    disableCmd = `schtasks /delete /tn "ASC_Worker_${esc(node.node_id)}" /f`;
+                } else if (osType === 'Darwin') {
+                    enableCmd = `launchctl load ~/Library/LaunchAgents/com.asc.worker.plist\n(See "Autostart on Boot" section for plist content with --master-host ${masterHost})`;
+                    disableCmd = `launchctl unload ~/Library/LaunchAgents/com.asc.worker.plist`;
+                } else {
+                    // Linux (default)
+                    enableCmd = `sudo tee /etc/systemd/system/asc-worker.service &lt;&lt;'EOF'\n[Unit]\nDescription=ASC Worker Node\nAfter=network.target\n\n[Service]\nType=simple\nUser=$USER\nWorkingDirectory=$PWD\nExecStart=$(which python) -m asc.cli.main worker --master-host ${masterHost} --master-port 52414 --non-interactive --skip-benchmark\nRestart=on-failure\nRestartSec=5\n\n[Install]\nWantedBy=multi-user.target\nEOF\nsudo systemctl daemon-reload &amp;&amp; sudo systemctl enable asc-worker.service`;
+                    disableCmd = `sudo systemctl disable asc-worker.service`;
+                }
+
+                html += `<div class="manual-node-card">
+                    <div class="manual-node-card-header">
+                        <span class="manual-node-card-name">${esc(node.node_id)}</span>
+                        <span class="manual-os-badge ${osBadgeClass}" style="font-size:9px;padding:1px 6px;">${osLabel} ${osArch}</span>
+                    </div>
+                    <p class="manual-desc">Enable autostart (run on this node's machine):</p>
+                    <div class="manual-cmd" onclick="copyCmd(this)">${enableCmd}</div>
+                    <p class="manual-desc" style="margin-top:8px">Disable autostart:</p>
+                    <div class="manual-cmd" onclick="copyCmd(this)">${disableCmd}</div>
+                </div>`;
+            });
+
+            container.innerHTML = html;
+        }
+
+        // ========== Manual Page ==========
+        function toggleManualSection(el) {
+            el.classList.toggle('collapsed');
+        }
+
+        function copyCmd(el) {
+            const text = el.textContent || el.innerText;
+            navigator.clipboard.writeText(text).then(() => {
+                showToast('Copied to clipboard', 'success');
+            }).catch(() => {
+                // Fallback
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+                showToast('Copied to clipboard', 'success');
+            });
+        }
+
+        // ========== Server Settings ==========
+        async function loadServerSettings() {
+            try {
+                const settings = await apiCall('GET', '/admin/server-settings');
+                document.getElementById('setting-api-port').value = settings.api_port || 8080;
+                document.getElementById('setting-require-auth').checked = settings.require_auth !== false;
+                document.getElementById('setting-enable-cors').checked = settings.enable_cors !== false;
+                document.getElementById('setting-serve-lan').checked = settings.serve_on_lan !== false;
+                document.getElementById('setting-jit-loading').checked = !!settings.jit_loading;
+                document.getElementById('setting-auto-unload').checked = !!settings.auto_unload;
+                document.getElementById('setting-max-idle-ttl').value = settings.max_idle_ttl_minutes || 60;
+                document.getElementById('setting-only-last').checked = !!settings.only_keep_last_model;
+            } catch (e) {
+                showToast('Failed to load settings: ' + e.message, 'error');
+            }
+        }
+
+        async function saveServerSettings() {
+            const settings = {
+                api_port: parseInt(document.getElementById('setting-api-port').value),
+                require_auth: document.getElementById('setting-require-auth').checked,
+                enable_cors: document.getElementById('setting-enable-cors').checked,
+                serve_on_lan: document.getElementById('setting-serve-lan').checked,
+                jit_loading: document.getElementById('setting-jit-loading').checked,
+                auto_unload: document.getElementById('setting-auto-unload').checked,
+                max_idle_ttl_minutes: parseInt(document.getElementById('setting-max-idle-ttl').value),
+                only_keep_last_model: document.getElementById('setting-only-last').checked,
+            };
+            try {
+                const result = await apiCall('PUT', '/admin/server-settings', settings);
+                showToast('Settings saved (' + result.workers_notified + ' workers notified)', 'success');
+            } catch (e) {
+                showToast('Failed to save: ' + e.message, 'error');
+            }
+        }
+
+        async function applyNodeLimits(nodeId, btnEl) {
+            const card = btnEl.closest('.node-card');
+            const sliders = card.querySelectorAll('input[type="range"]');
+            let memLimit = null, vramLimit = null;
+            sliders.forEach(s => {
+                const max = parseInt(s.max), val = parseInt(s.value);
+                if (s.dataset.type === 'mem' && val < max) memLimit = val;
+                if (s.dataset.type === 'vram' && val < max) vramLimit = val;
+            });
+            try {
+                await apiCall('PUT', `/admin/resource-policy/nodes/${nodeId}`, {
+                    memory_limit_mb: memLimit, vram_limit_mb: vramLimit,
+                });
+                // 更新本地缓存
+                nodePolicies[nodeId] = { memory_limit_mb: memLimit, vram_limit_mb: vramLimit };
+                showToast(`Limits applied to ${nodeId}`, 'success');
+            } catch (e) { showToast('Failed: ' + e.message, 'error'); }
+        }
+
+        // ========== API ==========
+        async function apiCall(method, path, body = null) {
+            const opts = { method, headers: { 'X-API-Key': API_KEY, 'Content-Type': 'application/json' } };
+            if (body) opts.body = JSON.stringify(body);
+            const resp = await fetch(path, opts);
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.detail || 'Request failed');
+            return data;
+        }
+
+        // ========== MODELS ==========
+        function handleFileDrop(event) {
+            event.preventDefault();
+            document.getElementById('drop-zone').classList.remove('dragover');
+            const files = event.dataTransfer.files;
+            if (files.length > 0) uploadFiles(files);
+        }
+        function handleFileSelect(event) {
+            const files = event.target.files;
+            if (files.length > 0) uploadFiles(files);
+            event.target.value = '';
+        }
+        async function uploadFiles(files) {
+            const valid = Array.from(files).filter(f => f.name.toLowerCase().endsWith('.gguf'));
+            if (!valid.length) { showToast('Only .gguf files', 'error'); return; }
+            if (valid.length < files.length) showToast(`Filtered ${files.length - valid.length} non-.gguf`, 'error');
+            for (const f of valid) await uploadSingleFile(f);
+            scanLocalModels();
+        }
+        async function uploadSingleFile(file) {
+            const progressDiv = document.getElementById('upload-progress');
+            const filenameEl = document.getElementById('upload-filename');
+            const percentEl = document.getElementById('upload-percent');
+            const barEl = document.getElementById('upload-bar');
+            const dropZone = document.getElementById('drop-zone');
+
+            // 禁用拖放区域
+            dropZone.style.pointerEvents = 'none';
+            dropZone.style.opacity = '0.5';
+
+            progressDiv.style.display = 'block';
+            const sizeStr = file.size >= 1073741824
+                ? (file.size / 1073741824).toFixed(2) + ' GB'
+                : (file.size / 1048576).toFixed(1) + ' MB';
+            filenameEl.textContent = file.name + ' (' + sizeStr + ')';
+            percentEl.textContent = '0%';
+            barEl.style.width = '0%';
+            barEl.style.background = 'var(--accent)';
+
+            const startTime = Date.now();
+
+            try {
+                const xhr = new XMLHttpRequest();
+
+                // 大文件（>100MB）使用 octet-stream 流式上传，避免 multipart 内存问题
+                const useStream = file.size > 100 * 1024 * 1024;
+                if (useStream) {
+                    const params = new URLSearchParams({ filename: file.name });
+                    xhr.open('POST', '/admin/models/upload?' + params.toString());
+                    xhr.setRequestHeader('X-API-Key', API_KEY);
+                    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+                } else {
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    xhr.open('POST', '/admin/models/upload');
+                    xhr.setRequestHeader('X-API-Key', API_KEY);
+                }
+
+                xhr.upload.onprogress = (e) => {
+                    if (e.lengthComputable) {
+                        const pct = Math.round(e.loaded / e.total * 100);
+                        percentEl.textContent = pct + '%';
+                        barEl.style.width = pct + '%';
+
+                        // 计算剩余时间
+                        const elapsed = (Date.now() - startTime) / 1000;
+                        const speed = e.loaded / elapsed;
+                        const remaining = (e.total - e.loaded) / speed;
+                        if (elapsed > 1 && speed > 0) {
+                            const speedStr = speed >= 1048576
+                                ? (speed / 1048576).toFixed(1) + ' MB/s'
+                                : (speed / 1024).toFixed(0) + ' KB/s';
+                            const remainStr = remaining > 60
+                                ? Math.ceil(remaining / 60) + 'min'
+                                : Math.ceil(remaining) + 's';
+                            percentEl.textContent = pct + '% · ' + speedStr + ' · ' + remainStr;
+                        }
+                    }
+                };
+
+                await new Promise((resolve, reject) => {
+                    xhr.onload = () => {
+                        if (xhr.status >= 200 && xhr.status < 300) {
+                            resolve(xhr.responseText);
+                        } else {
+                            try {
+                                const err = JSON.parse(xhr.responseText);
+                                reject(new Error(err.detail || xhr.statusText));
+                            } catch {
+                                reject(new Error(xhr.statusText || 'Upload failed'));
+                            }
+                        }
+                    };
+                    xhr.onerror = () => reject(new Error('Network error - connection reset'));
+                    xhr.ontimeout = () => reject(new Error('Upload timed out'));
+                    xhr.timeout = 0; // No timeout for large files
+                    if (useStream) {
+                        xhr.send(file);
+                    } else {
+                        const fd = new FormData();
+                        fd.append('file', file);
+                        xhr.send(fd);
+                    }
+                });
+
+                const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+                barEl.style.width = '100%';
+                barEl.style.background = 'var(--success)';
+                percentEl.textContent = 'Complete · ' + elapsed + 's';
+                filenameEl.textContent = file.name + ' ✓';
+                showToast(`${file.name} (${sizeStr}) uploaded in ${elapsed}s`, 'success');
+
+                // 保持显示完成状态 3 秒
+                await new Promise(r => setTimeout(r, 3000));
+
+            } catch (err) {
+                barEl.style.background = 'var(--danger)';
+                percentEl.textContent = 'Failed';
+                showToast(`Upload failed: ${file.name} - ${err.message}`, 'error');
+                log(`Upload failed: ${err.message}`, 'error');
+
+                // 保持显示错误状态 5 秒
+                await new Promise(r => setTimeout(r, 5000));
+            }
+
+            progressDiv.style.display = 'none';
+            barEl.style.background = 'var(--accent)';
+
+            // 恢复拖放区域
+            dropZone.style.pointerEvents = '';
+            dropZone.style.opacity = '';
+        }
+
+        async function scanLocalModels() {
+            try {
+                const data = await apiCall('GET', '/admin/models/local');
+                document.getElementById('models-dir-path').textContent = data.directory || '';
+                const listDiv = document.getElementById('local-models-list');
+                const models = data.models || [];
+                if (!models.length) { listDiv.innerHTML = '<div class="empty-state"><div class="empty-state-text">No models found</div></div>'; return; }
+                listDiv.innerHTML = models.map(m => {
+                    const sizeStr = m.size_mb >= 1024 ? (m.size_mb / 1024).toFixed(2) + ' GB' : m.size_mb + ' MB';
+                    const sel = selectedModel && selectedModel.name === m.name ? ' selected' : '';
+                    // Detect embedding models by filename patterns
+                    const fname = (m.filename || m.name).toLowerCase();
+                    const isEmbedding = fname.includes('embed') || fname.includes('e5-') || fname.includes('bge-');
+                    const typeBadge = isEmbedding
+                        ? '<span class="model-type-badge embedding">Embedding</span>'
+                        : '<span class="model-type-badge llm">LLM</span>';
+                    return `
+                    <div class="model-item${sel}" onclick="selectModel('${escAttr(m.name)}', '${escAttr(m.filename || m.name)}', ${m.size_mb || 0}, ${isEmbedding})">
+                        <div class="model-info">
+                            <div class="model-name" title="${escAttr(m.name)}">${esc(m.filename || m.name)} ${typeBadge}</div>
+                            <div class="model-meta">${sizeStr} &middot; GGUF</div>
+                        </div>
+                        <div class="model-actions">
+                            <button class="btn btn-danger" onclick="event.stopPropagation(); deleteLocalModel('${escAttr(m.name)}')">Del</button>
+                        </div>
+                    </div>`;
+                }).join('');
+                log(`Scan: ${models.length} models`, 'success');
+            } catch (e) { log('Scan failed: ' + e.message, 'error'); }
+        }
+
+        function selectModel(name, filename, sizeMb, isEmbedding) {
+            selectedModel = { name, filename, size_mb: sizeMb };
+            modelDomainType = isEmbedding ? 'embedding' : 'llm';
+            // Re-render list to show selection
+            document.querySelectorAll('.model-item').forEach(el => el.classList.remove('selected'));
+            event.currentTarget.classList.add('selected');
+            renderModelParams();
+        }
+
+        function getDefaultParams() {
+            return {
+                context_length: 4096,
+                gpu_offload_layers: -1,  // -1 = all
+                cpu_threads: 0,           // 0 = auto
+                eval_batch_size: 512,
+                physical_batch_size: 0,   // 0 = auto
+                max_concurrent: 1,
+                flash_attention: true,
+                keep_in_memory: true,
+                use_mmap: true,
+                offload_kv_to_gpu: true,
+                unified_kv_cache: false,
+                kv_quantization: 'none',
+                rope_freq_base: 0,        // 0 = auto
+                rope_freq_scale: 0,       // 0 = auto
+                seed: -1,                 // -1 = random
+                // GPU management
+                gpu_offload_ratio: "max",  // "max"/"off"/0-1
+                gpu_split_strategy: "evenly",
+                gpu_custom_ratio: [],
+                disabled_gpus: [],
+                // New loading params
+                use_fp16_for_kv_cache: true,
+                try_direct_io: false,
+                gpu_strict_vram_cap: false,
+                // Inference params
+                min_p_sampling: 0.0,
+                repeat_penalty: 0.0,
+                presence_penalty: 0.0,
+                frequency_penalty: 0.0,
+                context_overflow_policy: "truncateMiddle",
+                // Reasoning parsing
+                reasoning_parsing_enabled: true,
+                reasoning_start_string: "<think>",
+                reasoning_end_string: "</think>",
+                // Speculative decoding
+                speculative_decoding: false,
+                speculative_draft_model: "",
+                speculative_draft_max_tokens: 0,
+            };
+        }
+
+        // Helper: toggle accordion
+        function toggleAccordion(el) {
+            el.classList.toggle('collapsed');
+        }
+
+        // Helper: checkboxNumeric toggle
+        function onCheckboxNumericToggle(checkbox, numberId, paramKey) {
+            const numInput = document.getElementById(numberId);
+            numInput.disabled = !checkbox.checked;
+            if (checkbox.checked) {
+                modelParams[paramKey] = parseFloat(numInput.value);
+            } else {
+                modelParams[paramKey] = 0;
+            }
+        }
+
+        // Helper: checkboxNumeric value change
+        function onCheckboxNumericChange(numberId, paramKey) {
+            const numInput = document.getElementById(numberId);
+            if (!numInput.disabled) {
+                modelParams[paramKey] = parseFloat(numInput.value);
+            }
+        }
+
+        // Helper: GPU offload ratio mode change
+        function setGpuOffloadMode(mode) {
+            modelParams.gpu_offload_ratio = mode;
+            // Update button active states
+            document.querySelectorAll('.gpu-ratio-btn').forEach(b => b.classList.remove('active'));
+            document.querySelector(`.gpu-ratio-btn[data-mode="${mode}"]`).classList.add('active');
+            // Show/hide custom slider
+            const customSlider = document.getElementById('gpu-ratio-custom-row');
+            if (customSlider) customSlider.style.display = mode === 'custom' ? 'flex' : 'none';
+            updateEstMem();
+        }
+
+        // Helper: get available GPUs from nodes
+        function getAvailableGpus() {
+            const gpus = [];
+            nodes.forEach(node => {
+                if (node.gpus) {
+                    node.gpus.forEach((g, i) => {
+                        gpus.push({ node: node.node_id, index: i, name: g.name || `GPU ${i}` });
+                    });
+                }
+            });
+            return gpus;
+        }
+
+        // Helper: build checkboxNumeric HTML
+        function buildCheckboxNumeric(id, paramKey, label, value, defaultValue, hint, tagHtml) {
+            const checked = value > 0;
+            const displayVal = checked ? value : defaultValue;
+            return `
+                <div class="param-row">
+                    <span class="param-label">${label} ${hint ? `<span class="hint" title="${hint}">?</span>` : ''} ${tagHtml || ''}</span>
+                    <div class="param-checkbox-numeric">
+                        <input type="checkbox" id="${id}-chk" ${checked ? 'checked' : ''}
+                            onchange="onCheckboxNumericToggle(this, '${id}-val', '${paramKey}')">
+                        <input type="number" id="${id}-val" value="${displayVal}" step="0.01"
+                            ${!checked ? 'disabled' : ''}
+                            oninput="onCheckboxNumericChange('${id}-val', '${paramKey}')">
+                    </div>
+                </div>`;
+        }
+
+        // Helper: build toggle row
+        function buildToggle(id, paramKey, label, checked, hint, tagHtml) {
+            return `
+                <div class="param-row">
+                    <span class="param-label">${label} ${hint ? `<span class="hint" title="${hint}">?</span>` : ''} ${tagHtml || ''}</span>
+                    <label class="param-toggle"><input type="checkbox" id="${id}" ${checked ? 'checked' : ''} onchange="modelParams.${paramKey}=this.checked"><span class="toggle-track"></span></label>
+                </div>`;
+        }
+
+        function renderModelParams() {
+            if (!selectedModel) return;
+            const p = modelParams = getDefaultParams();
+            const nameEl = document.getElementById('param-model-name');
+            const tagEl = document.getElementById('param-model-tag');
+            nameEl.textContent = selectedModel.filename;
+            tagEl.style.display = '';
+
+            const sizeStr = selectedModel.size_mb >= 1024 ? (selectedModel.size_mb / 1024).toFixed(1) + ' GB' : selectedModel.size_mb + ' MB';
+            const availableGpus = getAvailableGpus();
+            const isEmbedding = modelDomainType === "embedding";
+
+            const panel = document.getElementById('param-panel');
+            panel.innerHTML = `
+                <!-- Model file info -->
+                <div class="param-section">
+                    <div class="param-section-title">Model File</div>
+                    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px;">${selectedModel.filename}</div>
+                    <div style="font-size:10px;color:var(--text-muted);">Size: ${sizeStr} &middot; Format: GGUF</div>
+                </div>
+
+                <!-- Model Domain Type -->
+                <div class="domain-type-selector">
+                    <button class="domain-type-btn ${modelDomainType === 'llm' ? 'active' : ''}" onclick="modelDomainType='llm'; renderModelParams()">LLM</button>
+                    <button class="domain-type-btn ${modelDomainType === 'embedding' ? 'active' : ''}" onclick="modelDomainType='embedding'; renderModelParams()">Embedding</button>
+                </div>
+
+                <!-- Estimated Memory -->
+                <div class="est-memory">
+                    <div class="est-memory-title">ESTIMATED MEMORY USAGE</div>
+                    <div class="est-memory-row"><span class="label">GPU</span><span class="val gpu" id="est-gpu">--</span></div>
+                    <div class="est-memory-row"><span class="label">Total RAM</span><span class="val ram" id="est-ram">--</span></div>
+                </div>
+
+                <!-- Resource Estimate (7.8) -->
+                <div class="resource-estimate" id="resource-estimate-area" style="display:none;">
+                    <div class="resource-estimate-title">RESOURCE ESTIMATE</div>
+                    <div id="resource-estimate-content"></div>
+                </div>
+
+                <!-- ===== GPU Configuration (Accordion, default open) ===== -->
+                <div class="param-accordion">
+                    <div class="param-accordion-header" onclick="toggleAccordion(this)">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                        GPU Configuration
+                    </div>
+                    <div class="param-accordion-body">
+                        <!-- GPU Offload Ratio -->
+                        <div class="param-row">
+                            <span class="param-label">GPU Offload Ratio <span class="hint" title="How much of the model to offload to GPU">?</span> <span class="param-tag machine">Machine</span></span>
+                            <div class="gpu-ratio-btns">
+                                <button class="gpu-ratio-btn ${p.gpu_offload_ratio === 'max' ? 'active' : ''}" data-mode="max" onclick="setGpuOffloadMode('max')">Max</button>
+                                <button class="gpu-ratio-btn ${p.gpu_offload_ratio === 'off' ? 'active' : ''}" data-mode="off" onclick="setGpuOffloadMode('off')">Off</button>
+                                <button class="gpu-ratio-btn ${p.gpu_offload_ratio === 'custom' ? 'active' : ''}" data-mode="custom" onclick="setGpuOffloadMode('custom')">Custom</button>
+                            </div>
+                        </div>
+                        <div class="param-row" id="gpu-ratio-custom-row" style="display:none;">
+                            <span class="param-label">Custom Ratio</span>
+                            <div class="param-slider"><input type="range" id="p-gpu-ratio" min="0" max="1" value="0.5" step="0.01"
+                                oninput="modelParams.gpu_offload_ratio=+this.value; this.parentElement.nextElementSibling.textContent=this.value; updateEstMem()"></div>
+                            <span class="param-value">0.5</span>
+                        </div>
+
+                        <!-- GPU Split Strategy -->
+                        <div class="param-row">
+                            <span class="param-label">GPU Split Strategy <span class="hint" title="How to distribute model across multiple GPUs">?</span></span>
+                            <select class="param-select" id="p-gpu-split" onchange="modelParams.gpu_split_strategy=this.value; document.getElementById('gpu-custom-ratio-row').style.display=this.value==='custom'?'flex':'none';">
+                                <option value="evenly" selected>Evenly</option>
+                                <option value="priorityOrder">Priority Order</option>
+                                <option value="custom">Custom</option>
+                            </select>
+                        </div>
+
+                        <!-- Custom GPU Ratio (shown when splitStrategy=custom) -->
+                        <div class="param-row" id="gpu-custom-ratio-row" style="display:none;">
+                            <span class="param-label">Custom GPU Ratios</span>
+                            <div id="gpu-custom-ratio-inputs" style="flex:1; display:flex; flex-wrap:wrap; gap:4px;">
+                                ${availableGpus.length > 0 ? availableGpus.map((g, i) => `
+                                    <div style="display:flex;align-items:center;gap:4px;">
+                                        <span style="font-size:10px;color:var(--text-muted);">${g.name.substring(0, 12)}</span>
+                                        <input class="param-input" type="number" style="width:50px;" value="1.0" min="0" max="1" step="0.1"
+                                            data-gpu-index="${i}" onchange="updateCustomGpuRatios()">
+                                    </div>
+                                `).join('') : '<span style="font-size:10px;color:var(--text-muted);">No GPUs detected</span>'}
+                            </div>
+                        </div>
+
+                        <!-- Disabled GPUs -->
+                        <div class="param-row" style="flex-direction:column; align-items:flex-start;">
+                            <span class="param-label" style="width:auto;">Disabled GPUs <span class="hint" title="Select GPUs to exclude from model loading">?</span></span>
+                            <div class="gpu-checkbox-list" id="disabled-gpus-list">
+                                ${availableGpus.length > 0 ? availableGpus.map((g, i) => `
+                                    <label class="gpu-checkbox-item">
+                                        <input type="checkbox" data-gpu-index="${i}" onchange="updateDisabledGpus()">
+                                        ${g.name.substring(0, 16)}
+                                    </label>
+                                `).join('') : '<span style="font-size:10px;color:var(--text-muted);">No GPUs detected</span>'}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ===== Performance (Accordion) ===== -->
+                <div class="param-accordion">
+                    <div class="param-accordion-header" onclick="toggleAccordion(this)">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                        Performance
+                    </div>
+                    <div class="param-accordion-body">
+                        ${buildToggle('p-flash', 'flash_attention', 'Flash Attention', p.flash_attention, 'Faster attention computation')}
+
+                        <div class="param-row">
+                            <span class="param-label">Context Length <span class="hint" title="Max tokens per request">?</span> <span class="param-tag machine">Machine</span></span>
+                            <input class="param-input" type="number" id="p-ctx" value="${p.context_length}" min="128" max="1048576" step="256"
+                                   oninput="modelParams.context_length=+this.value; updateEstMem()">
+                        </div>
+
+                        <div class="param-row">
+                            <span class="param-label">Eval Batch Size <span class="hint" title="Tokens per eval batch">?</span></span>
+                            <div class="param-slider"><input type="range" id="p-batch" min="32" max="2048" value="${p.eval_batch_size}" step="32"
+                                oninput="modelParams.eval_batch_size=+this.value; this.parentElement.nextElementSibling.textContent=this.value"></div>
+                            <span class="param-value">${p.eval_batch_size}</span>
+                        </div>
+
+                        <div class="param-row">
+                            <span class="param-label">Physical Batch Size <span class="hint" title="0 = auto">?</span></span>
+                            <input class="param-input" type="number" id="p-phys-batch" value="${p.physical_batch_size}" min="0" max="2048" step="1"
+                                   oninput="modelParams.physical_batch_size=+this.value">
+                        </div>
+
+                        <div class="param-row">
+                            <span class="param-label">CPU Threads <span class="hint" title="0 = auto (physical cores)">?</span> <span class="param-tag machine">Machine</span></span>
+                            <input class="param-input" type="number" id="p-threads" value="${p.cpu_threads}" min="0" max="256" step="1"
+                                   oninput="modelParams.cpu_threads=+this.value">
+                        </div>
+
+                        <div class="param-row">
+                            <span class="param-label">Max Concurrent <span class="hint" title="Parallel request slots">?</span> <span class="param-tag experimental">Experimental</span></span>
+                            <div class="param-slider"><input type="range" id="p-concurrent" min="1" max="8" value="${p.max_concurrent}" step="1"
+                                oninput="modelParams.max_concurrent=+this.value; this.parentElement.nextElementSibling.textContent=this.value"></div>
+                            <span class="param-value">${p.max_concurrent}</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ===== Memory (Accordion) ===== -->
+                <div class="param-accordion">
+                    <div class="param-accordion-header" onclick="toggleAccordion(this)">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                        Memory
+                    </div>
+                    <div class="param-accordion-body">
+                        ${buildToggle('p-kv-gpu', 'offload_kv_to_gpu', 'Offload KV Cache to GPU', p.offload_kv_to_gpu, 'Store KV cache in VRAM for speed')}
+                        ${buildToggle('p-fp16-kv', 'use_fp16_for_kv_cache', 'Use FP16 for KV Cache', p.use_fp16_for_kv_cache, 'Half precision KV cache saves VRAM')}
+                        ${buildToggle('p-mmap', 'use_mmap', 'Try Memory Map', p.use_mmap, 'Memory-mapped file loading')}
+                        ${buildToggle('p-direct-io', 'try_direct_io', 'Try Direct I/O', p.try_direct_io, 'Bypass OS cache for file reads')}
+                        ${buildToggle('p-keep', 'keep_in_memory', 'Keep Model in Memory', p.keep_in_memory, "Don't unload model when idle")}
+                        ${buildToggle('p-strict-vram', 'gpu_strict_vram_cap', 'GPU Strict VRAM Cap', p.gpu_strict_vram_cap, 'Enforce VRAM limit strictly')}
+
+                        <div class="param-row">
+                            <span class="param-label">Unified KV Cache <span class="hint" title="Experimental: shared KV pool">?</span> <span class="param-tag experimental">Experimental</span></span>
+                            <label class="param-toggle"><input type="checkbox" id="p-ukv" ${p.unified_kv_cache ? 'checked' : ''} onchange="modelParams.unified_kv_cache=this.checked"><span class="toggle-track"></span></label>
+                        </div>
+
+                        <div class="param-row">
+                            <span class="param-label">KV Quantization <span class="hint" title="Compress KV cache to save VRAM">?</span></span>
+                            <select class="param-select" id="p-kv-quant" onchange="modelParams.kv_quantization=this.value">
+                                <option value="none" ${p.kv_quantization==='none'?'selected':''}>None</option>
+                                <option value="q4_0" ${p.kv_quantization==='q4_0'?'selected':''}>Q4_0</option>
+                                <option value="q4_1" ${p.kv_quantization==='q4_1'?'selected':''}>Q4_1</option>
+                                <option value="q5_0" ${p.kv_quantization==='q5_0'?'selected':''}>Q5_0</option>
+                                <option value="q5_1" ${p.kv_quantization==='q5_1'?'selected':''}>Q5_1</option>
+                                <option value="q8_0" ${p.kv_quantization==='q8_0'?'selected':''}>Q8_0</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                ${!isEmbedding ? `
+                <!-- ===== Sampling (Accordion, LLM only) ===== -->
+                <div class="param-accordion">
+                    <div class="param-accordion-header collapsed" onclick="toggleAccordion(this)">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                        Sampling
+                    </div>
+                    <div class="param-accordion-body">
+                        ${buildCheckboxNumeric('p-minp', 'min_p_sampling', 'Min P Sampling', p.min_p_sampling, 0.05, 'Minimum probability threshold', '')}
+                        ${buildCheckboxNumeric('p-reppen', 'repeat_penalty', 'Repeat Penalty', p.repeat_penalty, 1.1, 'Penalize repeated tokens', '')}
+                        ${buildCheckboxNumeric('p-prespen', 'presence_penalty', 'Presence Penalty', p.presence_penalty, 0.0, 'Penalize token presence', '')}
+                        ${buildCheckboxNumeric('p-freqpen', 'frequency_penalty', 'Frequency Penalty', p.frequency_penalty, 0.0, 'Penalize token frequency', '')}
+
+                        <div class="param-row">
+                            <span class="param-label">Seed <span class="hint" title="-1 = Random">?</span></span>
+                            <input class="param-input" type="number" id="p-seed" value="${p.seed}" min="-1" max="2147483647" step="1"
+                                   oninput="modelParams.seed=+this.value">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ===== Context (Accordion, LLM only) ===== -->
+                <div class="param-accordion">
+                    <div class="param-accordion-header collapsed" onclick="toggleAccordion(this)">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                        Context
+                    </div>
+                    <div class="param-accordion-body">
+                        <div class="param-row">
+                            <span class="param-label">Context Overflow Policy <span class="hint" title="What to do when context exceeds limit">?</span></span>
+                            <select class="param-select" id="p-overflow" onchange="modelParams.context_overflow_policy=this.value">
+                                <option value="stopAtLimit">Stop at Limit</option>
+                                <option value="truncateMiddle" selected>Truncate Middle</option>
+                                <option value="rollingWindow">Rolling Window</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ===== Reasoning Parsing (Accordion, LLM only) ===== -->
+                <div class="param-accordion">
+                    <div class="param-accordion-header collapsed" onclick="toggleAccordion(this)">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                        Reasoning Parsing
+                    </div>
+                    <div class="param-accordion-body">
+                        ${buildToggle('p-reasoning', 'reasoning_parsing_enabled', 'Reasoning Parsing', p.reasoning_parsing_enabled, 'Parse reasoning/thinking blocks from output')}
+
+                        <div class="param-row">
+                            <span class="param-label">Start String</span>
+                            <input class="param-input" type="text" id="p-reason-start" value="${p.reasoning_start_string}"
+                                   oninput="modelParams.reasoning_start_string=this.value">
+                        </div>
+
+                        <div class="param-row">
+                            <span class="param-label">End String</span>
+                            <input class="param-input" type="text" id="p-reason-end" value="${p.reasoning_end_string}"
+                                   oninput="modelParams.reasoning_end_string=this.value">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ===== Speculative Decoding (Accordion, LLM only) ===== -->
+                <div class="param-accordion">
+                    <div class="param-accordion-header collapsed" onclick="toggleAccordion(this)">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                        Speculative Decoding <span class="param-tag experimental">Experimental</span>
+                    </div>
+                    <div class="param-accordion-body">
+                        ${buildToggle('p-spec-decode', 'speculative_decoding', 'Speculative Decoding', p.speculative_decoding, 'Use a draft model for faster inference', '<span class="param-tag experimental">Experimental</span>')}
+
+                        <div class="param-row">
+                            <span class="param-label">Draft Model <span class="hint" title="Path to draft model file">?</span></span>
+                            <input class="param-input" type="text" id="p-draft-model" value="${p.speculative_draft_model}" placeholder="Model path..."
+                                   oninput="modelParams.speculative_draft_model=this.value">
+                        </div>
+
+                        <div class="param-row">
+                            <span class="param-label">Draft Max Tokens <span class="hint" title="0 = auto">?</span></span>
+                            <input class="param-input" type="number" id="p-draft-tokens" value="${p.speculative_draft_max_tokens}" min="0" max="256" step="1"
+                                   oninput="modelParams.speculative_draft_max_tokens=+this.value">
+                        </div>
+                    </div>
+                </div>
+                ` : ''}
+
+                <!-- ===== Advanced (Accordion) ===== -->
+                <div class="param-accordion">
+                    <div class="param-accordion-header collapsed" onclick="toggleAccordion(this)">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                        Advanced
+                    </div>
+                    <div class="param-accordion-body">
+                        <div class="param-row">
+                            <span class="param-label">RoPE Freq Base <span class="hint" title="0 = Auto">?</span></span>
+                            <input class="param-input" type="number" id="p-rope-base" value="${p.rope_freq_base}" min="0" max="10000000" step="100"
+                                   oninput="modelParams.rope_freq_base=+this.value">
+                        </div>
+
+                        <div class="param-row">
+                            <span class="param-label">RoPE Freq Scale <span class="hint" title="0 = Auto">?</span></span>
+                            <input class="param-input" type="number" id="p-rope-scale" value="${p.rope_freq_scale}" min="0" max="10" step="0.1"
+                                   oninput="modelParams.rope_freq_scale=+this.value">
+                        </div>
+                    </div>
+                </div>
+            `;
+            updateEstMem();
+        }
+
+        function updateCustomGpuRatios() {
+            const inputs = document.querySelectorAll('#gpu-custom-ratio-inputs input[type="number"]');
+            modelParams.gpu_custom_ratio = Array.from(inputs).map(i => parseFloat(i.value) || 0);
+        }
+
+        function updateDisabledGpus() {
+            const checkboxes = document.querySelectorAll('#disabled-gpus-list input[type="checkbox"]');
+            modelParams.disabled_gpus = Array.from(checkboxes)
+                .filter(cb => cb.checked)
+                .map(cb => parseInt(cb.dataset.gpuIndex));
+        }
+
+        function updateEstMem() {
+            if (!selectedModel) return;
+            const modelSizeMb = selectedModel.size_mb || 0;
+            const ctx = modelParams.context_length || 4096;
+            const gpuOffload = modelParams.gpu_offload_ratio;
+
+            const kvPerCtxMb = modelSizeMb * 0.02 * (ctx / 4096);
+            const totalEst = modelSizeMb + kvPerCtxMb;
+
+            let gpuEst = 0;
+            if (gpuOffload === 'max') {
+                gpuEst = totalEst;
+            } else if (gpuOffload === 'off') {
+                gpuEst = 0;
+            } else {
+                // custom: numeric ratio
+                const ratio = typeof gpuOffload === 'number' ? gpuOffload : 0.5;
+                gpuEst = totalEst * ratio;
+            }
+            const kvGpu = modelParams.offload_kv_to_gpu;
+            if (!kvGpu) gpuEst = Math.max(0, gpuEst - kvPerCtxMb);
+
+            const gpuEl = document.getElementById('est-gpu');
+            const ramEl = document.getElementById('est-ram');
+            if (gpuEl) gpuEl.textContent = formatMB(Math.round(gpuEst));
+            if (ramEl) ramEl.textContent = formatMB(Math.round(totalEst));
+        }
+
+        function resetModelParams() {
+            if (!selectedModel) return;
+            modelParams = getDefaultParams();
+            renderModelParams();
+            showToast('Parameters reset', 'success');
+        }
+
+        async function estimateResources() {
+            if (!selectedModel) { showToast('Select a model first', 'error'); return; }
+            const area = document.getElementById('resource-estimate-area');
+            const content = document.getElementById('resource-estimate-content');
+            area.style.display = '';
+            content.innerHTML = '<div style="font-size:11px;color:var(--text-muted);">Estimating...</div>';
+
+            try {
+                const p = modelParams;
+                const result = await apiCall('POST', '/admin/estimate-resources', {
+                    model_path: selectedModel.name,
+                    config: {
+                        context_length: p.context_length,
+                        gpu_offload_ratio: p.gpu_offload_ratio,
+                        offload_kv_to_gpu: p.offload_kv_to_gpu,
+                        flash_attention: p.flash_attention,
+                        use_mmap: p.use_mmap,
+                        use_fp16_for_kv_cache: p.use_fp16_for_kv_cache,
+                    },
+                });
+
+                let html = '';
+                // Existing API returns: model_vram_mb, context_vram_mb, total_vram_mb, model_ram_mb, context_ram_mb, total_ram_mb, confidence, passes_guardrails, warnings, available_vram_mb, available_ram_mb
+                if (result.total_vram_mb !== undefined) {
+                    html += `<div class="resource-estimate-row"><span class="label">Estimated VRAM</span><span class="val gpu">${formatMB(result.total_vram_mb)}</span></div>`;
+                }
+                if (result.total_ram_mb !== undefined) {
+                    html += `<div class="resource-estimate-row"><span class="label">Estimated RAM</span><span class="val ram">${formatMB(result.total_ram_mb)}</span></div>`;
+                }
+                if (result.available_vram_mb !== undefined) {
+                    html += `<div class="resource-estimate-row"><span class="label">Available VRAM</span><span class="val gpu">${formatMB(result.available_vram_mb)}</span></div>`;
+                }
+                if (result.available_ram_mb !== undefined) {
+                    html += `<div class="resource-estimate-row"><span class="label">Available RAM</span><span class="val ram">${formatMB(result.available_ram_mb)}</span></div>`;
+                }
+                // Warning if guardrails fail
+                if (result.passes_guardrails === false) {
+                    html += '<div class="resource-estimate-warning">⚠ Resource limit exceeded!</div>';
+                }
+                if (result.warnings && result.warnings.length > 0) {
+                    result.warnings.forEach(w => {
+                        html += `<div style="font-size:10px;color:var(--warning);margin-top:2px;">⚠ ${w}</div>`;
+                    });
+                }
+                content.innerHTML = html || '<div style="font-size:11px;color:var(--text-muted);">No estimate data returned</div>';
+            } catch (e) {
+                // Fallback: use local estimation
+                const modelSizeMb = selectedModel.size_mb || 0;
+                const ctx = modelParams.context_length || 4096;
+                const kvPerCtxMb = modelSizeMb * 0.02 * (ctx / 4096);
+                const totalEst = modelSizeMb + kvPerCtxMb;
+                const gpuOffload = modelParams.gpu_offload_ratio;
+                let gpuEst = 0;
+                if (gpuOffload === 'max') gpuEst = totalEst;
+                else if (gpuOffload === 'off') gpuEst = 0;
+                else gpuEst = totalEst * (typeof gpuOffload === 'number' ? gpuOffload : 0.5);
+                if (!modelParams.offload_kv_to_gpu) gpuEst = Math.max(0, gpuEst - kvPerCtxMb);
+
+                // Calculate available from nodes
+                let totalVram = 0, totalRam = 0;
+                nodes.forEach(n => {
+                    totalVram += (n.gpus || []).reduce((s, g) => s + (g.vram_free_mb || 0), 0);
+                    totalRam += (n.memory_free_mb || 0);
+                });
+
+                const overVram = gpuEst > totalVram && totalVram > 0;
+                const overRam = totalEst > totalRam && totalRam > 0;
+
+                let html = '';
+                html += `<div class="resource-estimate-row"><span class="label">Estimated VRAM</span><span class="val gpu">${formatMB(Math.round(gpuEst))}</span></div>`;
+                html += `<div class="resource-estimate-row"><span class="label">Available VRAM</span><span class="val gpu">${formatMB(Math.round(totalVram))}</span></div>`;
+                html += `<div class="resource-estimate-row"><span class="label">Estimated RAM</span><span class="val ram">${formatMB(Math.round(totalEst))}</span></div>`;
+                html += `<div class="resource-estimate-row"><span class="label">Available RAM</span><span class="val ram">${formatMB(Math.round(totalRam))}</span></div>`;
+                if (overVram || overRam) {
+                    html += '<div class="resource-estimate-warning">⚠ Resource limit exceeded!</div>';
+                }
+                content.innerHTML = html;
+            }
+        }
+
+        async function loadModelWithParams() {
+            if (!selectedModel) { showToast('Select a model first', 'error'); return; }
+            const p = modelParams;
+
+            // Build request body - only include non-zero checkboxNumeric values
+            const body = {
+                model_path: selectedModel.name,
+                model_id: selectedModel.name.replace(/\.[^.]+$/, ''),
+                model_domain_type: modelDomainType,
+                gpu_layers: p.gpu_offload_layers,
+                context_length: p.context_length,
+                cpu_threads: p.cpu_threads,
+                eval_batch_size: p.eval_batch_size,
+                physical_batch_size: p.physical_batch_size,
+                max_concurrent: p.max_concurrent,
+                flash_attention: p.flash_attention,
+                keep_in_memory: p.keep_in_memory,
+                use_mmap: p.use_mmap,
+                offload_kv_to_gpu: p.offload_kv_to_gpu,
+                unified_kv_cache: p.unified_kv_cache,
+                kv_quantization: p.kv_quantization,
+                rope_freq_base: p.rope_freq_base,
+                rope_freq_scale: p.rope_freq_scale,
+                seed: p.seed,
+                // GPU management
+                gpu_offload_ratio: p.gpu_offload_ratio,
+                gpu_split_strategy: p.gpu_split_strategy,
+                gpu_custom_ratio: p.gpu_custom_ratio,
+                disabled_gpus: p.disabled_gpus,
+                // New loading params
+                use_fp16_for_kv_cache: p.use_fp16_for_kv_cache,
+                try_direct_io: p.try_direct_io,
+                gpu_strict_vram_cap: p.gpu_strict_vram_cap,
+                // Inference params (only if > 0 for checkboxNumeric)
+                context_overflow_policy: p.context_overflow_policy,
+                // Reasoning parsing
+                reasoning_parsing_enabled: p.reasoning_parsing_enabled,
+                reasoning_start_string: p.reasoning_start_string,
+                reasoning_end_string: p.reasoning_end_string,
+                // Speculative decoding
+                speculative_draft_model: p.speculative_draft_model,
+                speculative_draft_max_tokens: p.speculative_draft_max_tokens,
+            };
+
+            // Only include checkboxNumeric params when enabled (value > 0)
+            if (p.min_p_sampling > 0) body.min_p_sampling = p.min_p_sampling;
+            if (p.repeat_penalty > 0) body.repeat_penalty = p.repeat_penalty;
+            if (p.presence_penalty > 0) body.presence_penalty = p.presence_penalty;
+            if (p.frequency_penalty > 0) body.frequency_penalty = p.frequency_penalty;
+
+            try {
+                // Show loading overlay
+                showLoadProgress(body.model_id);
+                await apiCall('POST', '/admin/models/load-to-cluster', body);
+            } catch (e) {
+                hideLoadProgress();
+                showToast('Load failed: ' + e.message, 'error');
+            }
+        }
+
+        // ===== Model Load Progress =====
+        let loadProgressData = {}; // model_id -> { nodes: { node_id: status } }
+
+        function showLoadProgress(modelId) {
+            loadProgressData[modelId] = { nodes: {}, total: 0 };
+            let overlay = document.getElementById('load-progress-overlay');
+            if (!overlay) {
+                overlay = document.createElement('div');
+                overlay.id = 'load-progress-overlay';
+                overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:9999;display:flex;align-items:center;justify-content:center;';
+                document.body.appendChild(overlay);
+            }
+            overlay.style.display = 'flex';
+            renderLoadProgress(modelId);
+        }
+
+        function renderLoadProgress(modelId) {
+            const overlay = document.getElementById('load-progress-overlay');
+            if (!overlay) return;
+            const data = loadProgressData[modelId] || { nodes: {}, total: 0 };
+            const nodeEntries = Object.entries(data.nodes);
+            const doneCount = nodeEntries.filter(([, s]) => s === 'success').length;
+            const failCount = nodeEntries.filter(([, s]) => s === 'failed').length;
+            const total = data.total || nodeEntries.length || 1;
+            const pct = Math.round(((doneCount + failCount) / total) * 100);
+
+            overlay.innerHTML = `
+                <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:24px;min-width:360px;max-width:480px;">
+                    <div style="font-size:14px;font-weight:600;margin-bottom:12px;">Loading Model: ${esc(modelId)}</div>
+                    <div style="background:var(--bg-input);border-radius:6px;height:8px;margin-bottom:12px;overflow:hidden;">
+                        <div style="background:var(--accent);height:100%;width:${pct}%;transition:width 0.3s;border-radius:6px;"></div>
+                    </div>
+                    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px;">${doneCount} succeeded, ${failCount} failed, ${total - doneCount - failCount} pending</div>
+                    <div style="max-height:200px;overflow-y:auto;">
+                        ${nodeEntries.map(([nid, status]) => {
+                            const icon = status === 'success' ? '<span style="color:var(--success);">&#10003;</span>'
+                                : status === 'failed' ? '<span style="color:var(--danger);">&#10007;</span>'
+                                : '<span style="color:var(--warning);">&#9679;</span>';
+                            return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px;">${icon} <span>${esc(nid)}</span> <span style="color:var(--text-muted);">${status}</span></div>`;
+                        }).join('')}
+                        ${nodeEntries.length === 0 ? '<div style="color:var(--text-muted);font-size:12px;">Dispatching to nodes...</div>' : ''}
+                    </div>
+                    ${pct >= 100 ? `<button class="btn btn-accent" style="width:100%;margin-top:12px;" onclick="hideLoadProgress()">Close</button>` : ''}
+                </div>`;
+        }
+
+        function hideLoadProgress() {
+            const overlay = document.getElementById('load-progress-overlay');
+            if (overlay) overlay.style.display = 'none';
+            loadProgressData = {};
+        }
+
+        function handleLoadProgress(data) {
+            if (!data || !data.model_id) return;
+            if (!loadProgressData[data.model_id]) {
+                loadProgressData[data.model_id] = { nodes: {}, total: 0 };
+            }
+            const lp = loadProgressData[data.model_id];
+            if (data.nodes_total) lp.total = data.nodes_total;
+            if (data.node_id) {
+                lp.nodes[data.node_id] = data.node_status || data.status;
+            }
+            // Update total from node count if not set
+            if (!lp.total) lp.total = Object.keys(lp.nodes).length;
+            renderLoadProgress(data.model_id);
+        }
+
+        // ===== Unload Model =====
+        async function unloadModel(modelId) {
+            if (!confirm(`Unload "${modelId}" from all nodes?`)) return;
+            try {
+                await apiCall('POST', '/admin/models/unload-from-cluster', { model_id: modelId });
+                showToast(`Unloading ${modelId}...`, 'success');
+            } catch (e) { showToast('Unload failed: ' + e.message, 'error'); }
+        }
+
+        async function unloadSelectedModel() {
+            if (!selectedModel) { showToast('Select a model first', 'error'); return; }
+            const modelId = selectedModel.name.replace(/\.[^.]+$/, '');
+            await unloadModel(modelId);
+        }
+
+        async function deleteLocalModel(modelPath) {
+            if (!confirm(`Delete "${modelPath}"?`)) return;
+            try {
+                await apiCall('DELETE', `/admin/models/local/${encodeURIComponent(modelPath)}`);
+                showToast(`Deleted`, 'success');
+                if (selectedModel && selectedModel.name === modelPath) { selectedModel = null; document.getElementById('param-panel').innerHTML = '<div class="empty-state"><div class="empty-state-text">Select a model</div></div>'; document.getElementById('param-model-name').textContent = 'No model selected'; document.getElementById('param-model-tag').style.display = 'none'; }
+                scanLocalModels();
+            } catch (e) { showToast('Delete failed: ' + e.message, 'error'); }
+        }
+
+        // ===== Chat =====
+        let chatHistory = [];
+        let chatSending = false;
+
+        function updateChatModelSelect() {
+            const sel = document.getElementById('chat-model-select');
+            const currentVal = sel.value;
+            // Collect all loaded model IDs from nodes
+            const modelSet = new Set();
+            nodes.forEach(n => {
+                (n.loaded_model_ids || []).forEach(m => modelSet.add(m));
+            });
+            sel.innerHTML = '<option value="">-- Select a model --</option>';
+            modelSet.forEach(m => {
+                const opt = document.createElement('option');
+                opt.value = m; opt.textContent = m;
+                sel.appendChild(opt);
+            });
+            if (currentVal && modelSet.has(currentVal)) sel.value = currentVal;
+        }
+
+        function addChatMessage(role, content, isError) {
+            const empty = document.getElementById('chat-empty');
+            if (empty) empty.remove();
+            const container = document.getElementById('chat-messages');
+            const msg = document.createElement('div');
+            msg.className = `chat-msg ${role}`;
+            if (isError) msg.querySelector?.('.chat-msg-content')?.classList.add('error');
+            const avatar = document.createElement('div');
+            avatar.className = 'chat-msg-avatar';
+            avatar.textContent = role === 'user' ? 'U' : 'A';
+            const bubble = document.createElement('div');
+            bubble.className = 'chat-msg-content' + (isError ? ' error' : '');
+            bubble.textContent = content;
+            msg.appendChild(avatar);
+            msg.appendChild(bubble);
+            container.appendChild(msg);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function clearChat() {
+            chatHistory = [];
+            const container = document.getElementById('chat-messages');
+            container.innerHTML = '<div class="chat-empty" id="chat-empty">Load a model and start chatting</div>';
+        }
+
+        function autoResizeTextarea(el) {
+            el.style.height = 'auto';
+            el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+        }
+
+        function handleChatKey(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendChatMessage();
+            }
+        }
+
+        async function sendChatMessage() {
+            if (chatSending) return;
+            const input = document.getElementById('chat-input');
+            const text = input.value.trim();
+            if (!text) return;
+            const modelId = document.getElementById('chat-model-select').value;
+            if (!modelId) { showToast('Select a model first', 'error'); return; }
+
+            input.value = '';
+            input.style.height = 'auto';
+            addChatMessage('user', text);
+            chatHistory.push({ role: 'user', content: text });
+
+            chatSending = true;
+            document.getElementById('chat-send-btn').disabled = true;
+
+            try {
+                const resp = await fetch('/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-API-Key': API_KEY,
+                    },
+                    body: JSON.stringify({
+                        model: modelId,
+                        messages: chatHistory,
+                        max_tokens: 512,
+                        temperature: 0.7,
+                    }),
+                });
+                const data = await resp.json();
+                if (!resp.ok) {
+                    const errMsg = data.detail || JSON.stringify(data);
+                    addChatMessage('assistant', errMsg, true);
+                } else {
+                    const reply = data.choices?.[0]?.message?.content || '(empty response)';
+                    addChatMessage('assistant', reply);
+                    chatHistory.push({ role: 'assistant', content: reply });
+                }
+            } catch (e) {
+                addChatMessage('assistant', 'Network error: ' + e.message, true);
+            } finally {
+                chatSending = false;
+                document.getElementById('chat-send-btn').disabled = false;
+                document.getElementById('chat-input').focus();
+            }
+        }
+
+    </script>
+</body>
+</html>

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from asc.scheduler.load_balancer import LoadBalancer
-from asc.scheduler.request_scheduler import InferenceRequest, RequestScheduler
+from asc.scheduler.request_scheduler import ScheduledRequest, RequestScheduler
 
 
 class TestRequestScheduler:
@@ -13,7 +13,7 @@ class TestRequestScheduler:
         lb.register_node("n2")
         scheduler = RequestScheduler(load_balancer=lb)
 
-        req = InferenceRequest(
+        req = ScheduledRequest(
             request_id="r1", model_id="m1", prompt="hello"
         )
         result = scheduler.schedule(req, ["n1", "n2"])
@@ -30,7 +30,7 @@ class TestRequestScheduler:
         lb.start_request("n1")
         scheduler = RequestScheduler(load_balancer=lb)
 
-        req = InferenceRequest(
+        req = ScheduledRequest(
             request_id="r1", model_id="m1", prompt="hello"
         )
         result = scheduler.schedule(req, ["n1", "n2"])
@@ -43,7 +43,7 @@ class TestRequestScheduler:
         lb.register_node("n1")
         scheduler = RequestScheduler(load_balancer=lb)
 
-        req = InferenceRequest(
+        req = ScheduledRequest(
             request_id="r1", model_id="m1", prompt="hello"
         )
         scheduler.schedule(req, ["n1"])
@@ -63,7 +63,7 @@ class TestRequestScheduler:
 
     def test_schedule_no_candidates(self):
         scheduler = RequestScheduler()
-        req = InferenceRequest(
+        req = ScheduledRequest(
             request_id="r1", model_id="m1", prompt="hello"
         )
         result = scheduler.schedule(req, [])
@@ -77,7 +77,7 @@ class TestRequestScheduler:
             latency_estimator=lambda n: 50.0 if n == "n1" else 100.0,
         )
 
-        req = InferenceRequest(
+        req = ScheduledRequest(
             request_id="r1", model_id="m1", prompt="hello"
         )
         result = scheduler.schedule(req, ["n1"])

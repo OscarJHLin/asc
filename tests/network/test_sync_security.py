@@ -83,7 +83,7 @@ class TestValidateModelId:
 
     def test_empty_string(self):
         """空字符串应抛出 ValueError。"""
-        with pytest.raises(ValueError, match="model_id 不能为空"):
+        with pytest.raises(ValueError, match="非法字符"):
             _validate_model_id("")
 
     def test_dotdot(self):

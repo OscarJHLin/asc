@@ -15,9 +15,10 @@ Bully 算法是一种经典的分布式 leader 选举算法，核心思想是"ID
 - 状态机：IDLE -> ELECTING -> MASTER/WORKER
 - 超时机制：默认 5 秒，防止无限等待
 
-使用场景：
-    当现有 Master 故障或网络分区恢复后，由存活节点自动选举新 Master，
-    确保集群始终有且仅有一个 Master 负责调度。
+协议集成：
+    ElectionMessage 可通过 election_to_envelope() 转换为 Envelope，
+    经由 Binary Frame 协议的 Channel.ELECTION 通道传输。
+    接收方通过 envelope_to_election() 还原为 ElectionMessage。
 
 线程安全：
     本模块为纯同步实现，无 asyncio 依赖。MasterNode 在事件循环中调用时
@@ -79,6 +80,10 @@ class BullyElection:
     _election_clock: int = field(default=0, init=False)
     _election_start_time: float = field(default=0.0, init=False)
     election_timeout_sec: float = 5.0
+
+    def update_node_ids(self, node_ids: list[str]) -> None:
+        """动态更新集群节点 ID 列表。"""
+        self.all_node_ids = node_ids
 
     @property
     def state(self) -> ElectionState:
@@ -195,3 +200,66 @@ class BullyElection:
             sender_id=self.node_id,
             election_clock=self._election_clock,
         )
+
+
+# ---------------------------------------------------------------------------
+# 协议桥接：ElectionMessage <-> Envelope
+# ---------------------------------------------------------------------------
+
+# ElectionMessageType 到 MessageType 的映射
+_ELECTION_TYPE_MAP = {
+    ElectionMessageType.ELECTION: "election",
+    ElectionMessageType.ALIVE: "election_alive",
+    ElectionMessageType.COORDINATOR: "election_coordinator",
+}
+
+# MessageType 值到 ElectionMessageType 的反向映射
+_ELECTION_TYPE_REVERSE = {v: k for k, v in _ELECTION_TYPE_MAP.items()}
+
+
+def election_to_envelope(msg: ElectionMessage, target: str | None = None):
+    """将 ElectionMessage 转换为 Envelope，用于通过 Binary Frame 传输。
+
+    Args:
+        msg: 选举消息
+        target: 可选目标节点 ID
+
+    Returns:
+        Envelope 对象，可通过 TCP 传输
+    """
+    from asc.network.protocol import Channel, Envelope, Message, MessageType
+
+    msg_type_value = _ELECTION_TYPE_MAP[msg.type]
+    msg_type = MessageType(msg_type_value)
+
+    return Envelope(
+        channel=Channel.ELECTION,
+        message=Message(
+            type=msg_type,
+            sender_id=msg.sender_id,
+            payload={
+                "election_clock": msg.election_clock,
+            },
+        ),
+        target=target,
+    )
+
+
+def envelope_to_election(envelope) -> ElectionMessage | None:
+    """从 Envelope 还原 ElectionMessage。
+
+    Args:
+        envelope: 收到的 Envelope
+
+    Returns:
+        ElectionMessage 或 None（如果不是选举消息）
+    """
+    msg_type_value = envelope.message.type.value
+    if msg_type_value not in _ELECTION_TYPE_REVERSE:
+        return None
+
+    return ElectionMessage(
+        type=_ELECTION_TYPE_REVERSE[msg_type_value],
+        sender_id=envelope.message.sender_id,
+        election_clock=envelope.message.payload.get("election_clock", 0),
+    )

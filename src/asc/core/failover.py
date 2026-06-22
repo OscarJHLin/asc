@@ -142,12 +142,14 @@ class FailureDetector:
             if hb.missed_count >= self._config.suspect_threshold:
                 return NodeHealth.SUSPECT
 
-        # 主动探测：即使心跳未超时，也验证节点是否真正可达
-        # 这可以检测到"僵尸节点"（进程存活但无法处理请求）
-        if not self._probe(node_id):
-            hb.missed_count += 1
-            if hb.missed_count >= self._config.max_missed_heartbeats:
-                return NodeHealth.FAILED
+            # 心跳已超时，使用主动探测作为二次确认
+            if not self._probe(node_id):
+                # 探测也失败，加速故障判定
+                if hb.missed_count + 1 >= self._config.max_missed_heartbeats:
+                    return NodeHealth.FAILED
+                return NodeHealth.SUSPECT
+
+            # 探测成功但心跳已超时，仍标记为 SUSPECT
             return NodeHealth.SUSPECT
 
         return NodeHealth.HEALTHY
@@ -215,6 +217,11 @@ class FailoverManager:
     def is_failed(self, node_id: str) -> bool:
         """检查节点是否已标记为失败。"""
         return node_id in self._failed_nodes
+
+    def unregister(self, node_id: str) -> None:
+        """注销节点，清理所有相关状态。"""
+        self._failed_nodes.discard(node_id)
+        self._detector.unregister(node_id)
 
 
 class GracefulShutdown:

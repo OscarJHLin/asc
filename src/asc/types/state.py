@@ -78,6 +78,7 @@ class TaskStatus(enum.Enum):
     """推理任务状态。"""
 
     PENDING = "pending"
+    RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"

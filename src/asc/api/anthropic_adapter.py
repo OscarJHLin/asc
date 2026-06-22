@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
+from typing import Any
 
 from asc.api.prompt_converter import convert_messages_to_prompt
 
@@ -20,7 +21,7 @@ class AnthropicRequest:
     """Anthropic Messages 请求。"""
 
     model: str
-    messages: list[dict]
+    messages: list[dict[str, Any]]
     max_tokens: int = 128
     temperature: float = 0.7
     system: str | None = None
@@ -150,12 +151,8 @@ class MessageStopEvent:
         return {"type": self.type}
 
 
-def anthropic_messages_to_prompt(
-    messages: list[dict],
-    system: str | None = None,
-) -> str:
-    """将 Anthropic messages 转换为 llama.cpp prompt。"""
-    return convert_messages_to_prompt(messages, system=system)
+# 别名：供 AnthropicAdapter.format_prompt 和外部测试使用
+anthropic_messages_to_prompt = convert_messages_to_prompt
 
 
 class AnthropicAdapter:

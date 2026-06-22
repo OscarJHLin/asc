@@ -82,7 +82,7 @@ class PipelinePlanner:
     def _plan(
         self,
         total_layers: int,
-        node_weights: dict[str, float],
+        node_weights: dict[str, int | float],
     ) -> PipelinePlan:
         """计算 Pipeline 分片方案。
 

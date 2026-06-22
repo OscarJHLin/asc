@@ -133,7 +133,7 @@ class TestGetResourcesAsync:
             timestamp="2024-01-01T00:00:00",
             node_id="worker-1",
             node_hardware_summary={},
-            model_name="Qwen2.5-1.5B-Instruct",
+            model_name="Qwen2.5-0.5B-Instruct",
             quantization="Q4_K_M",
             question_results=[],
             avg_elapsed_ms=100.0,
@@ -205,10 +205,19 @@ class TestRunInference:
     @pytest.mark.asyncio
     async def test_normal_inference_sends_result(self):
         """正常推理应发送完成结果。"""
+        from asc.engine.base import EngineStatus
+        from unittest.mock import MagicMock
+
         agent = WorkerAgent(node_id="worker-1", port=52415)
         agent._client = AsyncMock()
 
-        await agent._run_inference("task-1", {})
+        # Mock 引擎返回
+        mock_engine = MagicMock()
+        mock_engine.status.return_value = EngineStatus.READY
+        mock_engine.submit_async = AsyncMock(return_value="Hello world")
+        agent._get_or_create_engine = AsyncMock(return_value=mock_engine)
+
+        await agent._run_inference("task-1", {"prompt": "Hi"})
 
         agent._client.send.assert_called_once()
         sent_envelope = agent._client.send.call_args[0][0]

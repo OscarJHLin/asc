@@ -14,8 +14,9 @@ from __future__ import annotations
 import time
 import uuid
 from dataclasses import dataclass, field
+from typing import Any
 
-from asc.api.prompt_converter import convert_messages_to_prompt
+from asc.api.prompt_converter import convert_messages_to_prompt  # noqa: F401 — re-exported
 
 
 @dataclass(frozen=True)
@@ -23,7 +24,7 @@ class ChatCompletionRequest:
     """OpenAI Chat Completion 请求。"""
 
     model: str
-    messages: list[dict]
+    messages: list[dict[str, Any]]
     max_tokens: int = 128
     temperature: float = 0.7
     top_p: float = 1.0
@@ -82,8 +83,8 @@ class ChatCompletionChunk:
     created: int = field(default_factory=lambda: int(time.time()))
     is_first: bool = False
 
-    def to_dict(self) -> dict:
-        delta: dict = {}
+    def to_dict(self) -> dict[str, Any]:
+        delta: dict[str, Any] = {}
         if self.is_first:
             delta["role"] = "assistant"
         if self.delta_content:
@@ -91,7 +92,7 @@ class ChatCompletionChunk:
         if self.finish_reason is None and not self.delta_content and not self.is_first:
             delta["role"] = "assistant"
 
-        choice: dict = {
+        choice: dict[str, Any] = {
             "index": 0,
             "delta": delta,
         }
@@ -124,9 +125,8 @@ class ModelInfo:
         }
 
 
-def messages_to_prompt(messages: list[dict]) -> str:
-    """将 OpenAI messages 数组转换为 llama.cpp prompt。"""
-    return convert_messages_to_prompt(messages)
+# 别名：供 OpenAIAdapter.format_prompt 和外部测试使用
+messages_to_prompt = convert_messages_to_prompt
 
 
 class OpenAIAdapter:

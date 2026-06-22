@@ -1,14 +1,12 @@
 """Phase 3 集成测试：验证生产化模块的完整协作。
 
-测试 API 适配器 + Master 主循环 + Model Manager + Discovery + Pipeline 的端到端流程。
+测试 API 适配器 + Master 主循环 + Discovery + Pipeline 的端到端流程。
 """
 
-from pathlib import Path
 
 from asc.api.anthropic_adapter import AnthropicAdapter, AnthropicRequest
 from asc.api.ollama_adapter import OllamaAdapter, OllamaChatRequest
 from asc.api.openai_adapter import ChatCompletionRequest, OpenAIAdapter
-from asc.core.model_manager import ModelManager
 from asc.master.main import MasterNode
 from asc.network.discovery import DiscoveryMessage, NodeDiscovery
 from asc.scheduler.pipeline import PipelinePlanner
@@ -86,19 +84,11 @@ class TestAPIAdaptersWithMaster:
         assert resp.message["content"] == "Hi!"
 
 
-class TestModelManagerWithMaster:
-    """Model Manager 与 Master 协作。"""
+class TestModelRegistrationWithMaster:
+    """模型注册与 Master 协作。"""
 
-    def test_model_registration_and_instance_creation(self):
-        """注册模型 -> Master 创建实例。"""
-        manager = ModelManager(models_dir=Path("/tmp/asc-models"))
-        manager.register("llama-3.1-8b", "/models/llama-3.1-8b-q4.gguf")
-
-        # Master 创建实例时使用 ModelManager 解析路径
-        model_path = manager.resolve("llama-3.1-8b")
-        assert model_path is not None
-        assert model_path == "/models/llama-3.1-8b-q4.gguf"
-
+    def test_model_instance_creation(self):
+        """Master 创建实例。"""
         master = MasterNode(node_id="master")
         master.process_node_joined("n1", "10.0.0.1", 52415)
         master._emit(RunnerStatusUpdated(node_id="n1", status="ready"))

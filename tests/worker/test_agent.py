@@ -160,7 +160,7 @@ class TestWorkerAgent:
             timestamp="2024-01-01T00:00:00",
             node_id="node-1",
             node_hardware_summary={},
-            model_name="Qwen2.5-1.5B-Instruct",
+            model_name="Qwen2.5-0.5B-Instruct",
             quantization="Q4_K_M",
             question_results=[],
             avg_elapsed_ms=100.0,

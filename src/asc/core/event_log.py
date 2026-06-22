@@ -19,7 +19,7 @@ import zlib
 from abc import ABC, abstractmethod
 from dataclasses import asdict, fields
 from pathlib import Path
-from typing import Generator
+from typing import Any, Generator
 
 from asc.types.common import InstanceId, NodeId, TaskId
 from asc.types.events import Event, IndexedEvent, event_type
@@ -28,9 +28,9 @@ from asc.types.state import ClusterState, apply, empty_state
 # --- 事件序列化 ---
 
 
-def _serialize_event(event: Event) -> dict:
+def _serialize_event(event: Event) -> dict[str, Any]:
     """将事件序列化为字典。"""
-    result: dict = {"event_type": event_type(event)}
+    result: dict[str, Any] = {"event_type": event_type(event)}
 
     # NewType 类型名到标记的映射
     typed_fields = _get_typed_field_names(event)

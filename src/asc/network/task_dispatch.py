@@ -12,18 +12,9 @@
 
 from __future__ import annotations
 
-import enum
 from dataclasses import dataclass
 
-
-class TaskStatus(enum.Enum):
-    """任务状态。"""
-
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
+from asc.types.state import TaskStatus
 
 
 @dataclass(frozen=True)

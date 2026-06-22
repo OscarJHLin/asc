@@ -378,10 +378,7 @@ class TestRunBenchmark:
                 mock_deploy2.assert_not_called()
             assert report2.avg_tps == pytest.approx(report1.avg_tps, rel=1e-3)
             # 第一次运行启动 server；第二次命中缓存，不应再启动 server
-            # bs2 的 _deploy_benchmark_model 被 patch，但 bs 第一次运行已调用 1 次 Popen
-            # 因此 mock_popen.call_count 应为 1（外层 with 作用域内 bs2 的 patch 不额外调用）
-            # 注：由于 patch 作用域问题，此处仅验证 mock_deploy2.assert_not_called() 即可
-            # assert mock_popen.call_count == 1
+            # mock_deploy2.assert_not_called() 已验证第二次不部署
 
     def test_run_benchmark_model_not_found(self, temp_dir: Path, fake_questions_file: Path):
         bs = BenchmarkScore(

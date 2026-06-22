@@ -3,7 +3,7 @@
 import os
 from unittest.mock import patch
 
-from asc.api.auth import require_api_key, validate_model_id
+from asc.api.auth import _init_default_store, require_api_key, validate_model_id
 
 
 class TestRequireApiKey:
@@ -12,35 +12,40 @@ class TestRequireApiKey:
     def test_no_api_key_configured_rejects(self):
         """S-02/S-03: 未配置 ASC_API_KEY 时拒绝请求。"""
         with patch.dict(os.environ, {}, clear=True):
-            # 移除可能存在的环境变量
             os.environ.pop("ASC_API_KEY", None)
             os.environ.pop("ASC_ALLOW_NO_AUTH", None)
+            _init_default_store()
             assert require_api_key() is False
 
-    def test_no_api_key_with_allow_no_auth(self):
-        """ASC_ALLOW_NO_AUTH=1 时允许免认证。"""
+    def test_no_api_key_with_allow_no_auth_allows(self):
+        """ASC_ALLOW_NO_AUTH=1 允许免认证访问（仅用于开发/测试环境）。"""
         with patch.dict(os.environ, {"ASC_ALLOW_NO_AUTH": "1"}, clear=True):
             os.environ.pop("ASC_API_KEY", None)
+            _init_default_store()
             assert require_api_key() is True
 
     def test_correct_api_key_passes(self):
         """正确 API Key 通过认证。"""
         with patch.dict(os.environ, {"ASC_API_KEY": "test-key-123"}, clear=True):
+            _init_default_store()
             assert require_api_key("test-key-123") is True
 
     def test_wrong_api_key_rejects(self):
         """错误 API Key 被拒绝。"""
         with patch.dict(os.environ, {"ASC_API_KEY": "test-key-123"}, clear=True):
+            _init_default_store()
             assert require_api_key("wrong-key") is False
 
     def test_none_api_key_rejects(self):
         """无 API Key 被拒绝。"""
         with patch.dict(os.environ, {"ASC_API_KEY": "test-key-123"}, clear=True):
+            _init_default_store()
             assert require_api_key(None) is False
 
     def test_empty_api_key_rejects(self):
         """空 API Key 被拒绝。"""
         with patch.dict(os.environ, {"ASC_API_KEY": "test-key-123"}, clear=True):
+            _init_default_store()
             assert require_api_key("") is False
 
 
@@ -51,13 +56,15 @@ class TestTimingAttackPrevention:
         """验证使用 hmac.compare_digest 而非 ==。"""
         import inspect
 
-        source = inspect.getsource(require_api_key)
+        from asc.api.auth import ApiKeyStore
+
+        source = inspect.getsource(ApiKeyStore.resolve_role)
         assert "hmac.compare_digest" in source
-        assert " == " not in source or "hmac.compare_digest" in source
 
     def test_wrong_key_always_fails(self):
         """各种错误 Key 都被拒绝。"""
         with patch.dict(os.environ, {"ASC_API_KEY": "correct-key"}, clear=True):
+            _init_default_store()
             assert require_api_key("wrong") is False
             assert require_api_key("correct-ke") is False
             assert require_api_key("correct-keyy") is False

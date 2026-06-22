@@ -67,8 +67,8 @@ class TestChannelCompleteness:
         assert Channel.REBALANCE.value == "rebalance"
 
     def test_channel_count(self):
-        """Channel 枚举恰好包含 8 个成员。"""
-        assert len(Channel) == 8
+        """Channel 枚举恰好包含 9 个成员（含 SYSTEM）。"""
+        assert len(Channel) == 9
 
 
 # ---------------------------------------------------------------------------
@@ -84,7 +84,6 @@ class TestMessageTypeCompleteness:
         assert MessageType.TASK_ACCEPT.value == "task_accept"
         assert MessageType.TASK_PROGRESS.value == "task_progress"
         assert MessageType.TASK_RESULT.value == "task_result"
-        assert MessageType.TASK_CANCEL_MSG.value == "task_cancel_msg"
 
     def test_capacity_types(self):
         """容量相关消息类型值正确。"""
@@ -393,7 +392,7 @@ class TestErrorHandling:
             decode_envelope(data)
 
     def test_decode_missing_channel_field(self):
-        """JSON 中缺少 channel 字段时应抛出 KeyError。"""
+        """JSON 中缺少 channel 字段时应抛出 ValueError。"""
         raw = {
             "message": {
                 "type": "heartbeat",
@@ -403,20 +402,20 @@ class TestErrorHandling:
             },
         }
         data = json.dumps(raw).encode("utf-8")
-        with pytest.raises(KeyError):
+        with pytest.raises(ValueError, match="channel"):
             decode_envelope(data)
 
     def test_decode_missing_message_field(self):
-        """JSON 中缺少 message 字段时应抛出 KeyError。"""
+        """JSON 中缺少 message 字段时应抛出 ValueError。"""
         raw = {
             "channel": "events",
         }
         data = json.dumps(raw).encode("utf-8")
-        with pytest.raises(KeyError):
+        with pytest.raises(ValueError, match="message"):
             decode_envelope(data)
 
     def test_decode_missing_type_in_message(self):
-        """JSON 中 message 缺少 type 字段时应抛出 KeyError。"""
+        """JSON 中 message 缺少 type 字段时应抛出 ValueError。"""
         raw = {
             "channel": "events",
             "message": {
@@ -426,11 +425,11 @@ class TestErrorHandling:
             },
         }
         data = json.dumps(raw).encode("utf-8")
-        with pytest.raises(KeyError):
+        with pytest.raises(ValueError, match="type"):
             decode_envelope(data)
 
     def test_decode_missing_sender_id_in_message(self):
-        """JSON 中 message 缺少 sender_id 字段时应抛出 KeyError。"""
+        """JSON 中 message 缺少 sender_id 字段时应抛出 ValueError。"""
         raw = {
             "channel": "events",
             "message": {
@@ -440,11 +439,11 @@ class TestErrorHandling:
             },
         }
         data = json.dumps(raw).encode("utf-8")
-        with pytest.raises(KeyError):
+        with pytest.raises(ValueError, match="sender_id"):
             decode_envelope(data)
 
     def test_decode_missing_payload_in_message(self):
-        """JSON 中 message 缺少 payload 字段时应抛出 KeyError。"""
+        """JSON 中 message 缺少 payload 字段时应抛出 ValueError。"""
         raw = {
             "channel": "events",
             "message": {
@@ -454,11 +453,11 @@ class TestErrorHandling:
             },
         }
         data = json.dumps(raw).encode("utf-8")
-        with pytest.raises(KeyError):
+        with pytest.raises(ValueError, match="payload"):
             decode_envelope(data)
 
     def test_decode_missing_timestamp_in_message(self):
-        """JSON 中 message 缺少 timestamp 字段时应抛出 KeyError。"""
+        """JSON 中 message 缺少 timestamp 字段时应抛出 ValueError。"""
         raw = {
             "channel": "events",
             "message": {
@@ -468,5 +467,5 @@ class TestErrorHandling:
             },
         }
         data = json.dumps(raw).encode("utf-8")
-        with pytest.raises(KeyError):
+        with pytest.raises(ValueError, match="timestamp"):
             decode_envelope(data)

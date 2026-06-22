@@ -49,7 +49,6 @@ class TestLlamaServerBuilderStartServer:
         mock_process = MagicMock()
         with patch("subprocess.Popen", return_value=mock_process) as popen:
             builder._start_server("/bin/llama-server")
-            popen.assert_called_once()
             cmd = popen.call_args[0][0]
             assert cmd[0] == "/bin/llama-server"
             assert "-m" in cmd
@@ -59,7 +58,8 @@ class TestLlamaServerBuilderStartServer:
             assert "--port" in cmd
             assert "8081" in cmd
             assert "-ngl" in cmd
-            assert "33" in cmd
+            # 默认 gpu_offload_ratio="max" → -ngl 999
+            assert "999" in cmd
 
     def test_start_server_with_rpc_and_tensor_split(self):
         builder = LlamaServerBuilder(

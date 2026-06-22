@@ -90,32 +90,45 @@ class TestFailureDetectorMissedHeartbeats:
 
 
 class TestFailureDetectorProbeFn:
-    """自定义 probe_fn 返回 False 导致 SUSPECT/FAILED。"""
+    """自定义 probe_fn 在心跳超时后作为二次确认。"""
 
-    def test_probe_false_leads_to_suspect(self):
+    def test_probe_false_after_timeout_leads_to_suspect(self):
+        """心跳超时 + probe 返回 False 导致 SUSPECT。"""
         cfg = FailoverConfig(
-            heartbeat_timeout_sec=10.0, suspect_threshold=1, max_missed_heartbeats=3
+            heartbeat_timeout_sec=0.0, suspect_threshold=1, max_missed_heartbeats=3
         )
         detector = FailureDetector(config=cfg, probe_fn=lambda _n: False)
         detector.register("node-e")
+        # 心跳已超时（timeout=0），probe 返回 False，应标记为 SUSPECT
         assert detector.check("node-e") == NodeHealth.SUSPECT
 
-    def test_probe_false_leads_to_failed(self):
+    def test_probe_false_after_timeout_leads_to_failed(self):
+        """心跳超时 + probe 返回 False 多次导致 FAILED。"""
         cfg = FailoverConfig(
-            heartbeat_timeout_sec=10.0, suspect_threshold=1, max_missed_heartbeats=2
+            heartbeat_timeout_sec=0.0, suspect_threshold=1, max_missed_heartbeats=2
         )
         detector = FailureDetector(config=cfg, probe_fn=lambda _n: False)
         detector.register("node-f")
         assert detector.check("node-f") == NodeHealth.SUSPECT
         assert detector.check("node-f") == NodeHealth.FAILED
 
+    def test_probe_not_called_when_heartbeat_ok(self):
+        """心跳正常时，即使 probe 返回 False 也应保持 HEALTHY。"""
+        cfg = FailoverConfig(
+            heartbeat_timeout_sec=100.0, suspect_threshold=1, max_missed_heartbeats=2
+        )
+        detector = FailureDetector(config=cfg, probe_fn=lambda _n: False)
+        detector.register("node-g")
+        # 心跳未超时，probe 不应影响健康状态
+        assert detector.check("node-g") == NodeHealth.HEALTHY
+
     def test_probe_true_keeps_healthy(self):
         cfg = FailoverConfig(
             heartbeat_timeout_sec=10.0, suspect_threshold=1, max_missed_heartbeats=2
         )
         detector = FailureDetector(config=cfg, probe_fn=lambda _n: True)
-        detector.register("node-g")
-        assert detector.check("node-g") == NodeHealth.HEALTHY
+        detector.register("node-g2")
+        assert detector.check("node-g2") == NodeHealth.HEALTHY
 
 
 class TestFailureDetectorUnregister:

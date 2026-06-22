@@ -17,8 +17,8 @@ from asc.types.state import ClusterState
 
 
 @dataclass(frozen=True)
-class InferenceRequest:
-    """推理请求。"""
+class ScheduledRequest:
+    """调度层推理请求。"""
 
     request_id: str
     model_id: str
@@ -31,7 +31,7 @@ class InferenceRequest:
 class ScheduleResult:
     """调度结果。"""
 
-    request: InferenceRequest
+    request: ScheduledRequest
     selected_node: str
     strategy: str
     estimated_latency_ms: float
@@ -53,7 +53,7 @@ class RequestScheduler:
 
     def schedule(
         self,
-        request: InferenceRequest,
+        request: ScheduledRequest,
         candidates: list[str],
         state: ClusterState | None = None,
     ) -> ScheduleResult | None:
